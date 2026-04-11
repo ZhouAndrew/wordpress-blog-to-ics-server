@@ -1,5 +1,6 @@
 # wordpress-blog-to-ics-server
-listen to wordpress server and convert post to ics server for user to subscripe 
+listen to wordpress server and convert post to ics server for user to subscripe
+
 The post might be like 
 ```
 andrew@andrew:~$ wp post get 10213 --field=post_content --path=/var/www/html/wordpress
