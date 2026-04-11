@@ -1,8 +1,106 @@
-# wp_log_parser
+# WordPress Daily Log → ICS Exporter
 
-A configurable local CLI tool that fetches daily WordPress logs, parses Gutenberg `post_content`, and exports ICS events.
+This project parses daily logs stored in WordPress posts (Gutenberg format) and converts them into structured events and ready-to-publish ICS calendar files.
 
-## Installation
+## ✨ Overview
+
+Daily activities are recorded in WordPress posts as simple paragraph blocks:
+
+```html
+<!-- wp:paragraph -->
+<p>07:45 Breakfast and baked pizza</p>
+<!-- /wp:paragraph -->
+```
+
+This project transforms those logs into calendar events by applying a simple rule:
+
+> **The end time of one event is the start time of the next event.**
+
+## 🧠 Core Concept
+
+Logs are interpreted as a **sequence of time-based events**.
+
+Example:
+
+```text
+07:45 Breakfast
+08:30 Enabled Thunderbird
+```
+
+Becomes:
+
+| Event               | Start | End       |
+| ------------------- | ----- | --------- |
+| Breakfast           | 07:45 | 08:30     |
+| Enabled Thunderbird | 08:30 | (unknown) |
+
+## 📥 Input Format
+
+* Source: WordPress `post_content`
+* Format: Gutenberg blocks
+* Primary block used: `wp:paragraph`
+
+## ✅ Log Detection Rules
+
+A paragraph is considered a valid log entry if it starts with:
+
+* `H:MM` (example: `8:30`)
+* `HH:MM` (example: `07:45`)
+
+Normalization:
+
+```text
+8:30 → 08:30
+```
+
+## ❌ Ignored Content
+
+The following block types are ignored:
+
+* `wp:file`
+* `wp:image`
+* `wp:list`
+* `wp:heading`
+* paragraphs without a leading time
+
+## ⏱ Event Construction
+
+Events are built using sequential inference:
+
+```text
+event[i].end = event[i+1].start
+```
+
+The last event has no inferred end unless a fallback duration is configured.
+
+## 📤 Output Format
+
+### Structured parser output
+
+Default parser output contains:
+
+* `entries`
+* `ignored_blocks`
+* `ics_preview`
+
+Each entry includes:
+
+* `date`
+* `start_time`
+* `end_time` (or `null`)
+* `summary`
+* `raw`
+* `status` (`ready` or `needs_review`)
+
+### ICS export
+
+Generates valid `VCALENDAR` content with one `VEVENT` per parsed entry.
+
+## Local CLI Tooling
+
+The repository now includes a configurable local CLI package: `wp_log_parser/`.
+
+### Installation
 
 ```bash
 python -m venv .venv
@@ -11,23 +109,49 @@ pip install -U pip
 pip install requests pytest
 ```
 
-## Dependency checks
-
-Run dependency and environment validation:
-
-```bash
-python -m wp_log_parser validate-config --config ./config.json
-```
-
-## Configuration wizard
-
-Run the interactive wizard:
+### Configuration wizard
 
 ```bash
 python -m wp_log_parser init-config --wizard --config ./config.json
 ```
 
-Sample wizard session:
+Wizard features:
+
+* numbered choices for enum prompts
+* `y/yes/n/no` support
+* Enter accepts defaults
+* immediate validation loops on invalid input
+* summary output with masked application password
+
+### Dependency checks
+
+```bash
+python -m wp_log_parser validate-config --config ./config.json
+```
+
+### wp-cli mode
+
+```bash
+python -m wp_log_parser fetch-post --config ./config.json --post-id 123
+```
+
+### REST mode
+
+```bash
+python -m wp_log_parser run-today --config ./config.json
+```
+
+### Example command set
+
+```bash
+python -m wp_log_parser init-config --wizard
+python -m wp_log_parser validate-config --config ./config.json
+python -m wp_log_parser fetch-post --config ./config.json --post-id 10213
+python -m wp_log_parser parse-post --config ./config.json --post-id 10213
+python -m wp_log_parser run-today --config ./config.json
+```
+
+### Sample interactive wizard session
 
 ```text
 Welcome to wp_log_parser setup wizard
@@ -58,43 +182,19 @@ WordPress application password. [default: ]
 Configuration summary:
   - wordpress_mode: rest
   - app_password: an********rd
-
-Save config
-Write config to ./config.json? [default: y]
-> y
 ```
 
-## wp-cli mode
-Use local WordPress installation + wp-cli command:
+### Config reference
 
-```bash
-python -m wp_log_parser fetch-post --config ./config.json --post-id 123
-```
+See `example.config.json` for complete field reference.
 
-## REST API mode
-Use WordPress REST API with username + application password.
+### Troubleshooting
 
-```bash
-python -m wp_log_parser run-today --config ./config.json
-```
+* `wp-cli not found`: set `wp_cli_path`.
+* `Path exists but does not look like WordPress`: fix `wp_path`.
+* `REST authentication failed`: verify username + application password.
+* Validation is read-only and does not mutate `config.json`.
 
-## Troubleshooting
+## 📄 License
 
-- `wp-cli not found`: set `wp_cli_path` correctly.
-- `Path exists but does not look like WordPress`: set `wp_path` to WP root.
-- `REST authentication failed`: verify username and application password.
-- Validation failures do not mutate config files; run the setup wizard to change settings.
-
-## Example commands
-
-```bash
-python -m wp_log_parser init-config --wizard
-python -m wp_log_parser validate-config --config ./config.json
-python -m wp_log_parser fetch-post --config ./config.json --post-id 10213
-python -m wp_log_parser parse-post --config ./config.json --post-id 10213
-python -m wp_log_parser run-today --config ./config.json
-```
-
-## Config file reference
-
-See `example.config.json` for all supported fields.
+MIT (or your choice)
