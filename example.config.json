@@ -1,0 +1,19 @@
+{
+  "wordpress_mode": "wpcli",
+  "wp_cli_path": "wp",
+  "wp_path": "/var/www/html/wordpress",
+  "python_path": "python3",
+  "output_dir": "./output",
+  "error_dir": "./errors",
+  "log_format": "gutenberg_raw",
+  "base_url": "https://example.com",
+  "username": "",
+  "app_password": "",
+  "verify_ssl": true,
+  "ics_base_url": "https://calendar.example.com/ics",
+  "timezone": "UTC",
+  "default_last_event_minutes": 30,
+  "allow_empty_summary": false,
+  "auto_cross_midnight": true,
+  "save_ignored_blocks": true
+}
