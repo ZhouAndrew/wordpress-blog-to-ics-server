@@ -1,3 +1,230 @@
+# WordPress Daily Log → ICS Exporter
+
+This project parses daily logs stored in WordPress posts (Gutenberg format) and converts them into structured events and ready-to-publish ICS calendar files.
+
+---
+
+## ✨ Overview
+
+Daily activities are recorded in WordPress posts as simple paragraph blocks:
+
+```html
+<!-- wp:paragraph -->
+<p>07:45 Breakfast and baked pizza</p>
+<!-- /wp:paragraph -->
+```
+
+This project transforms those logs into calendar events by applying a simple rule:
+
+> **The end time of one event is the start time of the next event.**
+
+---
+
+## 🧠 Core Concept
+
+Logs are not treated as plain text.
+
+They are interpreted as a **sequence of time-based events**.
+
+Example:
+
+```
+07:45 Breakfast
+08:30 Enabled Thunderbird
+```
+
+Becomes:
+
+| Event               | Start | End       |
+| ------------------- | ----- | --------- |
+| Breakfast           | 07:45 | 08:30     |
+| Enabled Thunderbird | 08:30 | (unknown) |
+
+---
+
+## 📥 Input Format
+
+* Source: WordPress `post_content`
+* Format: Gutenberg blocks
+* Primary block used: `wp:paragraph`
+
+Example:
+
+```html
+<!-- wp:paragraph -->
+<p>8:30 Enabled Thunderbird on laptop</p>
+<!-- /wp:paragraph -->
+```
+
+---
+
+## ✅ Log Detection Rules
+
+A paragraph is considered a valid log entry if:
+
+* It starts with a time
+* Supported formats:
+
+  * `H:MM` (e.g. `8:30`)
+  * `HH:MM` (e.g. `07:45`)
+
+Normalization:
+
+```
+8:30 → 08:30
+```
+
+---
+
+## ❌ Ignored Content
+
+The following blocks are ignored:
+
+* `wp:file`
+* `wp:image`
+* `wp:list`
+* `wp:heading`
+* Paragraphs without a leading time
+
+---
+
+## ⏱ Event Construction
+
+Events are built using sequential inference:
+
+```
+event[i].end = event[i+1].start
+```
+
+### Example
+
+```
+07:45 Breakfast
+08:30 Work
+09:10 Meeting
+```
+
+→
+
+* Breakfast: 07:45 → 08:30
+* Work: 08:30 → 09:10
+* Meeting: 09:10 → (unknown)
+
+---
+
+## ⚠️ Final Event Handling
+
+The last event has no natural end time.
+
+Supported strategies:
+
+* `omit_last_without_end`
+* `mark_last_for_review` (default)
+* `fallback_duration_minutes`
+
+Example:
+
+```json
+{
+  "start_time": "09:10",
+  "end_time": null,
+  "status": "needs_review"
+}
+```
+
+---
+
+## 📤 Output Format
+
+### 1. Structured JSON
+
+```json
+[
+  {
+    "date": "2026-04-11",
+    "start_time": "07:45",
+    "end_time": "08:30",
+    "summary": "Breakfast and baked pizza",
+    "status": "ready"
+  }
+]
+```
+
+---
+
+### 2. ICS Calendar
+
+Generated as a valid `VCALENDAR`:
+
+```ics
+BEGIN:VCALENDAR
+VERSION:2.0
+
+BEGIN:VEVENT
+UID:20260411-0745-breakfast@example.com
+DTSTART:20260411T074500
+DTEND:20260411T083000
+SUMMARY:Breakfast and baked pizza
+END:VEVENT
+
+END:VCALENDAR
+```
+
+---
+
+## 🧩 Pipeline
+
+```
+WordPress post_content
+        ↓
+Parse Gutenberg blocks
+        ↓
+Extract time-based logs
+        ↓
+Normalize timestamps
+        ↓
+Infer event durations
+        ↓
+Generate structured JSON
+        ↓
+Export ICS
+```
+
+---
+
+## 🛠 Design Principles
+
+* **Deterministic** — no guessing of missing times
+* **Append-only logs** — original content is never modified
+* **Structure over text** — logs become events
+* **Explicit uncertainty** — unknown end times are not hidden
+
+---
+
+## 🔧 Future Improvements
+
+* Tag-based categorization (work / life / study)
+* Multi-day log support
+* Timezone handling
+* CLI tool (e.g. `log "message"`)
+* Direct WordPress → ICS sync
+
+---
+
+## 📌 Summary
+
+This project turns simple daily logs into structured, calendar-ready data.
+
+Key idea:
+
+> Logs + time order = calendar events
+
+---
+
+## 📄 License
+
+MIT (or your choice)
+
 # wordpress-blog-to-ics-server
 listen to wordpress server and convert post to ics server for user to subscripe
 
