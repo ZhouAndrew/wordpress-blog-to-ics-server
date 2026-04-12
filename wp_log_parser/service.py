@@ -10,7 +10,26 @@ from .wordpress import (
     fetch_post_content_wpcli,
     find_today_post_id_rest,
     find_today_post_id_wpcli,
+    list_posts_rest,
+    list_posts_wpcli,
+    sort_and_limit_posts,
 )
+
+
+def list_posts(config: AppConfig, per_page: int | None = None) -> list[dict[str, str | int]]:
+    per_page = config.post_selection_count if per_page is None else per_page
+    if config.wordpress_mode == "wpcli":
+        posts = list_posts_wpcli(config.wp_path, config.wp_cli_path, per_page=per_page, limit=per_page)
+    else:
+        posts = list_posts_rest(
+            config.base_url,
+            config.username,
+            config.app_password,
+            config.verify_ssl,
+            per_page=per_page,
+            limit=per_page,
+        )
+    return posts
 
 
 def fetch_post(config: AppConfig, post_id: int | None = None) -> tuple[int, str]:

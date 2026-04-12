@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 from .config import config_exists, create_default_config, load_config, save_config
 from .ics import generate_ics
 from .parser import parse_post_content
 from .service import fetch_post, run_today_pipeline
-from .setup_wizard import run_setup_wizard
+from .setup_wizard import run_setup_wizard, select_post_id
 from .validators import (
     validate_dependencies,
     validate_output_dir,
@@ -54,10 +55,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_fetch = sub.add_parser("fetch-post")
     p_fetch.add_argument("--config", default="./config.json")
     p_fetch.add_argument("--post-id", type=int)
+    p_fetch.add_argument("--select-post-id", action="store_true", help="Interactively select a post ID from recent posts.")
 
     p_parse = sub.add_parser("parse-post")
     p_parse.add_argument("--config", default="./config.json")
     p_parse.add_argument("--post-id", type=int)
+    p_parse.add_argument("--select-post-id", action="store_true", help="Interactively select a post ID from recent posts.")
 
     p_export = sub.add_parser("export-ics")
     p_export.add_argument("--config", default="./config.json")
@@ -94,12 +97,30 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if args.command == "fetch-post":
-        post_id, content = fetch_post(config, args.post_id)
+        if args.select_post_id and args.post_id is not None:
+            print("Cannot use --select-post-id and --post-id together.")
+            return 2
+        post_id = args.post_id
+        if args.select_post_id:
+            if not sys.stdin.isatty():
+                print("Interactive post selection requires a TTY.")
+                return 2
+            post_id = select_post_id(config)
+        post_id, content = fetch_post(config, post_id)
         print(json.dumps({"post_id": post_id, "post_content": content}, ensure_ascii=False, indent=2))
         return 0
 
     if args.command == "parse-post":
-        post_id, content = fetch_post(config, args.post_id)
+        if args.select_post_id and args.post_id is not None:
+            print("Cannot use --select-post-id and --post-id together.")
+            return 2
+        post_id = args.post_id
+        if args.select_post_id:
+            if not sys.stdin.isatty():
+                print("Interactive post selection requires a TTY.")
+                return 2
+            post_id = select_post_id(config)
+        post_id, content = fetch_post(config, post_id)
         from datetime import date
         parsed = parse_post_content(content, date.today().isoformat(), config)
         parsed["post_id"] = post_id

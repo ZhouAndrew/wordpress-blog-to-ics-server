@@ -5,6 +5,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .config import AppConfig, create_default_config, save_config
+from .service import list_posts
 from .validators import (
     validate_dependencies,
     validate_output_dir,
@@ -62,6 +63,54 @@ def prompt_choice(label: str, explanation: str, choices: list[str], default: str
         if value.isdigit() and 1 <= int(value) <= len(choices):
             return choices[int(value) - 1]
         print("Invalid choice. Enter a valid number.")
+
+
+def prompt_post_selection(label: str, explanation: str, posts: list[dict[str, str | int]], default_index: int = 1) -> int:
+    if not posts:
+        raise ValueError("No posts available for selection")
+    default_index = max(1, min(default_index, len(posts)))
+    while True:
+        print(f"\n{label}\n{explanation}")
+        for idx, post in enumerate(posts, 1):
+            print(
+                f"  {idx}) {post['date']} [{post['status']}] {post['title']} (ID: {post['id']})"
+            )
+        
+def prompt_post_selection(
+    label: str,
+    explanation: str,
+    posts: list[dict[str, str | int]],
+    default_index: int | None = None,
+) -> int:
+    if not posts:
+        raise ValueError("No posts available for selection")
+
+   
+    default_index = default_index or len(posts)
+    default_index = max(1, min(default_index, len(posts)))
+
+    while True:
+        print(f"\n{label}\n{explanation}")
+        for idx, post in enumerate(posts, 1):
+            print(
+                f"  {idx}) {post['date']} [{post['status']}] {post['title']} (ID: {post['id']})"
+            )
+
+        print(f"[default: {default_index}]")
+        value = input("> ").strip()
+
+        if not value:
+            return int(posts[default_index - 1]["id"])
+
+        if value.isdigit():
+            chosen = int(value)
+            if 1 <= chosen <= len(posts):
+                return int(posts[chosen - 1]["id"])
+            for post in posts:
+                if post["id"] == chosen:
+                    return chosen
+
+        print("Invalid choice. Enter the number shown or an exact post ID.")
 
 
 def prompt_int(label: str, explanation: str, default: int) -> int:
@@ -142,10 +191,15 @@ def run_setup_wizard(config_path: str) -> AppConfig:
         "Allow timeline to cross midnight when entries go from later to earlier clock time.",
         cfg.auto_cross_midnight,
     )
+    cfg.post_selection_count = prompt_int(
+        "8) Post selection count",
+        "How many recent posts should be listed when selecting a post interactively?",
+        cfg.post_selection_count,
+    )
 
-    cfg.ics_base_url = prompt_text("7) ICS base URL", "Public base URL for generated ICS files.", cfg.ics_base_url)
+    cfg.ics_base_url = prompt_text("9) ICS base URL", "Public base URL for generated ICS files.", cfg.ics_base_url)
 
-    print("\n8) Environment validation")
+    print("\n10) Environment validation")
     results = []
     results.extend(validate_dependencies())
     results.append(validate_python_path(cfg.python_path))
@@ -177,3 +231,15 @@ def run_setup_wizard(config_path: str) -> AppConfig:
     else:
         print("Config not saved.")
     return cfg
+
+
+def select_post_id(config: AppConfig, per_page: int | None = None) -> int:
+    posts = list_posts(config, per_page=per_page)
+    if not posts:
+        raise ValueError("No posts found for interactive selection")
+    return prompt_post_selection(
+        "Select post to fetch",
+        "Choose a post from the list below. Enter the number or exact post ID.",
+        posts,
+        default_index=len(posts),
+    )

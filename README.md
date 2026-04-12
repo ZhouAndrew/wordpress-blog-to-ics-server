@@ -135,6 +135,14 @@ python -m wp_log_parser validate-config --config ./config.json
 python -m wp_log_parser fetch-post --config ./config.json --post-id 123
 ```
 
+### Interactive post selection
+
+```bash
+python -m wp_log_parser fetch-post --config ./config.json --select-post-id
+```
+
+The number of posts returned in the interactive selector is controlled by `post_selection_count` in `config.json`.
+
 ### REST mode
 
 ```bash
@@ -147,6 +155,7 @@ python -m wp_log_parser run-today --config ./config.json
 python -m wp_log_parser init-config --wizard
 python -m wp_log_parser validate-config --config ./config.json
 python -m wp_log_parser fetch-post --config ./config.json --post-id 10213
+python -m wp_log_parser fetch-post --config ./config.json --select-post-id
 python -m wp_log_parser parse-post --config ./config.json --post-id 10213
 python -m wp_log_parser run-today --config ./config.json
 ```

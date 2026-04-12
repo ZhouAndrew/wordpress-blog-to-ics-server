@@ -23,6 +23,7 @@ class AppConfig:
     ics_base_url: str = ""
     timezone: str = "UTC"
     default_last_event_minutes: int = 30
+    post_selection_count: int = 20
     allow_empty_summary: bool = False
     auto_cross_midnight: bool = True
     save_ignored_blocks: bool = True
@@ -64,5 +65,10 @@ def load_config(path: str) -> AppConfig:
         data["default_last_event_minutes"] = int(data["default_last_event_minutes"])
     except (TypeError, ValueError) as exc:
         raise ConfigError("default_last_event_minutes must be an integer") from exc
+
+    try:
+        data["post_selection_count"] = int(data.get("post_selection_count", defaults.post_selection_count))
+    except (TypeError, ValueError) as exc:
+        raise ConfigError("post_selection_count must be an integer") from exc
 
     return AppConfig(**data)
