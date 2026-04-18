@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import time
 from datetime import datetime, timezone
 from functools import partial
@@ -92,8 +91,6 @@ def publish_once(config: AppConfig, days: int, verbose: bool = False) -> dict[st
         "today_source_file": today_source,
         "items": items,
     }
-    if verbose:
-        print(json.dumps(result, ensure_ascii=False, indent=2))
     return result
 
 
@@ -134,6 +131,11 @@ def run_service_loop(
     try:
         next_cycle_at = time.monotonic() + interval_seconds
         while True:
+            now = time.monotonic()
+            sleep_for = max(0.0, next_cycle_at - now)
+            print(f"[INFO] Sleeping {sleep_for:.1f}s before next cycle")
+            time.sleep(sleep_for)
+
             started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             print(f"[INFO] Publish cycle started at {started_at}")
             try:
@@ -141,10 +143,6 @@ def run_service_loop(
                 print("[OK] Publish cycle completed")
             except Exception as exc:
                 print(f"[ERROR] Publish cycle failed: {exc}")
-            now = time.monotonic()
-            sleep_for = max(0.0, next_cycle_at - now)
-            print(f"[INFO] Sleeping {sleep_for:.1f}s before next cycle")
-            time.sleep(sleep_for)
             next_cycle_at += interval_seconds
     finally:
         server.shutdown()
