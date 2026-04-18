@@ -2,6 +2,7 @@
 */*.ics]
 */*/*.ics
 config.json
+published_ics/*.*
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
