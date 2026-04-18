@@ -326,6 +326,26 @@ Configuration summary:
 
 See `example.config.json` for complete field reference.
 
+Custom parsing patterns (`custom_parsing_patterns`) support two forms:
+
+1. **String regex** (backward-compatible)  
+   Treated as `kind=point`.
+2. **Object**:
+
+```json
+{
+  "name": "range_with_label",
+  "kind": "range",
+  "regex": "^(?P<start>\\d{2}:\\d{2})\\s*to\\s*(?P<end>\\d{2}:\\d{2})\\s+(?P<summary>.+)$"
+}
+```
+
+Required named groups:
+
+* `start` (required always)
+* `end` (required when `kind=range`)
+* `summary` (optional; empty summary rules still apply)
+
 ### Troubleshooting
 
 * `wp-cli not found`: set `wp_cli_path`.

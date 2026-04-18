@@ -54,6 +54,8 @@ def fetch_post(config: AppConfig, post_id: int | None = None) -> tuple[int, str]
 def run_today_pipeline(config: AppConfig) -> dict:
     post_id, post_content = fetch_post(config, None)
     parsed = parse_post_content(post_content, date.today().isoformat(), config)
-    parsed["ics_preview"] = generate_ics(parsed["entries"], timezone=config.timezone)
-    parsed["post_id"] = post_id
-    return parsed
+    parsed.post_id = post_id
+    parsed.source_id = f"wp:{post_id}"
+    payload = parsed.to_dict(include_ignored=config.save_ignored_blocks)
+    payload["ics_preview"] = generate_ics(payload["entries"], timezone=config.timezone)
+    return payload

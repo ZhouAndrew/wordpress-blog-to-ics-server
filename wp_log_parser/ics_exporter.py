@@ -9,6 +9,9 @@ from pathlib import Path
 from .fetcher import PostData, normalize_post_date
 from .ics import generate_ics
 
+from .models import IgnoredBlock, ParsedPost
+
+
 
 def safe_slug(title: str, limit: int = 60) -> str:
     slug = re.sub(r"[^\w\-.]+", "_", title.strip(), flags=re.UNICODE).strip("_")

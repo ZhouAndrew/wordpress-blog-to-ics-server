@@ -16,5 +16,6 @@
   "post_selection_count": 20,
   "allow_empty_summary": false,
   "auto_cross_midnight": true,
-  "save_ignored_blocks": true
+  "save_ignored_blocks": true,
+  "custom_parsing_patterns": []
 }
