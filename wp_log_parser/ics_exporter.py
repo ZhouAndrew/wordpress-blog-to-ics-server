@@ -8,7 +8,9 @@ from pathlib import Path
 
 from .fetcher import PostData, normalize_post_date
 from .ics import generate_ics
+
 from .models import IgnoredBlock, ParsedPost
+
 
 
 def safe_slug(title: str, limit: int = 60) -> str:
@@ -21,11 +23,11 @@ def build_output_filename(post: PostData) -> str:
     return f"{date_part}_post_{post.post_id}_{safe_slug(post.title)}.ics"
 
 
-def write_post_ics(post: PostData, parsed: ParsedPost, output_dir: str, timezone: str) -> Path:
+def write_post_ics(post: PostData, entries: list[dict], output_dir: str, timezone: str) -> Path:
     filename = build_output_filename(post)
     path = Path(output_dir) / filename
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(generate_ics(parsed.entries, timezone=timezone), encoding="utf-8", newline="")
+    path.write_text(generate_ics(entries, timezone=timezone), encoding="utf-8", newline="")
     return path
 
 
@@ -51,16 +53,9 @@ def write_publish_index(
     return path
 
 
-def write_ignored_blocks(output_dir: str, ics_filename: str, ignored_blocks: list[IgnoredBlock]) -> Path:
+def write_ignored_blocks(output_dir: str, ics_filename: str, ignored_blocks: list[dict]) -> Path:
     path = Path(output_dir) / ics_filename.replace(".ics", ".ignored.json")
-    payload = [item.__dict__ for item in ignored_blocks]
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    return path
-
-
-def write_parsed_post_json(output_dir: str, ics_filename: str, parsed: ParsedPost) -> Path:
-    path = Path(output_dir) / ics_filename.replace(".ics", ".parsed.json")
-    path.write_text(json.dumps(parsed.to_dict(include_ignored=True), ensure_ascii=False, indent=2), encoding="utf-8")
+    path.write_text(json.dumps(ignored_blocks, ensure_ascii=False, indent=2), encoding="utf-8")
     return path
 
 

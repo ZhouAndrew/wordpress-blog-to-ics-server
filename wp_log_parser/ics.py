@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime, timezone
+
 from typing import Any
+
 
 
 def escape_ics_text(value: str) -> str:
@@ -31,7 +33,7 @@ def build_public_ics_url(ics_base_url: str, filename: str) -> str | None:
     return f"{ics_base_url.rstrip('/')}/{filename.lstrip('/')}"
 
 
-def generate_ics(entries: list[Any], timezone: str = "UTC") -> str:
+def generate_ics(entries: list[dict], timezone: str = "UTC") -> str:
     dtstamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     lines = [
         "BEGIN:VCALENDAR",

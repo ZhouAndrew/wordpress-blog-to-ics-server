@@ -9,7 +9,7 @@ from .aliases import find_today_ics_candidates, generate_today_ics, select_today
 from .config import config_exists, create_default_config, load_config, save_config
 from .fetcher import fetch_post, normalize_post_date
 from .ics import generate_ics
-from .ics_exporter import write_parsed_post_json, write_post_ics
+from .ics_exporter import write_post_ics
 from .parser import parse_post_content
 from .service import fetch_post as fetch_post_legacy, run_today_pipeline
 from .service_mode import publish_once, run_service_loop
@@ -176,11 +176,11 @@ def main(argv: list[str] | None = None) -> int:
                 print("Interactive post selection requires a TTY.")
                 return 2
             post_id = select_post_id(config)
-        post = fetch_post(config, post_id)
-        parsed = parse_post_content(post.post_content, normalize_post_date(post.post_date), config)
-        parsed.post_id = post.post_id
-        parsed.source_id = f"wp:{post.post_id}"
-        print(json.dumps(parsed.to_dict(include_ignored=config.save_ignored_blocks), ensure_ascii=False, indent=2))
+        post_id, content = fetch_post_legacy(config, post_id)
+        from datetime import date
+        parsed = parse_post_content(content, date.today().isoformat(), config)
+        parsed["post_id"] = post_id
+        print(json.dumps(parsed, ensure_ascii=False, indent=2))
         return 0
 
     if args.command == "export-ics":
@@ -196,17 +196,11 @@ def main(argv: list[str] | None = None) -> int:
         post = fetch_post(config, args.post_id)
         post_date = normalize_post_date(post.post_date)
         parsed = parse_post_content(post.post_content, post_date, config, verbose=args.verbose)
-        parsed.post_id = post.post_id
-        parsed.source_id = f"wp:{post.post_id}"
-        for entry in parsed.entries:
-            entry.source_id = parsed.source_id
-        parsed_dict = parsed.to_dict(include_ignored=config.save_ignored_blocks)
-        parsed_dict["ics_preview"] = generate_ics(parsed_dict["entries"], timezone=config.timezone)
-        if not parsed.entries:
+        parsed["ics_preview"] = generate_ics(parsed["entries"], timezone=config.timezone)
+        if not parsed["entries"]:
             print("No valid timed log entries found in post.")
             return 1
-        out_path = write_post_ics(post, parsed, config.output_dir, config.timezone)
-        write_parsed_post_json(config.output_dir, out_path.name, parsed)
+        out_path = write_post_ics(post, parsed["entries"], config.output_dir, config.timezone)
         if args.verbose:
             print(f"[OK] Wrote ICS file: {out_path}")
         print(
@@ -216,10 +210,8 @@ def main(argv: list[str] | None = None) -> int:
                     "title": post.title,
                     "post_date": post.post_date,
                     "output_file": str(out_path),
-                    "parsed_json_file": out_path.name.replace(".ics", ".parsed.json"),
-                    "entry_count": len(parsed.entries),
-                    "ignored_block_count": len(parsed.ignored_blocks),
-                    "warning_count": len(parsed.warnings),
+                    "entry_count": len(parsed["entries"]),
+                    "ignored_block_count": len(parsed["ignored_blocks"]),
                 },
                 ensure_ascii=False,
                 indent=2,
