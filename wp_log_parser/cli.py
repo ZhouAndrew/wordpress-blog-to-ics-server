@@ -3,12 +3,12 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .aliases import find_today_ics_candidates, generate_today_ics, select_today_ics, today_date_str
 from .config import config_exists, create_default_config, load_config, save_config
-from .fetcher import fetch_post, list_recent_post_ids
+from .fetcher import fetch_post, list_recent_post_ids, normalize_post_date
 from .ics import build_public_ics_url, generate_ics
 from .ics_exporter import (
     write_ignored_blocks,
@@ -169,7 +169,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "post-to-ics":
         post = fetch_post(config, args.post_id)
-        post_date = post.post_date.split(" ")[0]
+        post_date = normalize_post_date(post.post_date)
         parsed = parse_post_content(post.post_content, post_date, config, verbose=args.verbose)
         parsed["ics_preview"] = generate_ics(parsed["entries"], timezone=config.timezone)
         if not parsed["entries"]:
@@ -201,7 +201,7 @@ def main(argv: list[str] | None = None) -> int:
         items = []
         for post_id in post_ids:
             post = fetch_post(config, post_id)
-            post_date = post.post_date.split(" ")[0]
+            post_date = normalize_post_date(post.post_date)
             parsed = parse_post_content(post.post_content, post_date, config, verbose=args.verbose)
             if not parsed["entries"]:
                 if args.verbose:
@@ -248,7 +248,7 @@ def main(argv: list[str] | None = None) -> int:
         print(
             json.dumps(
                 {
-                    "generated_at": datetime.now(UTC).isoformat(),
+                    "generated_at": datetime.now(timezone.utc).isoformat(),
                     "recent_days": args.days,
                     "published_count": len(items),
                     "index_json": str(index_path),

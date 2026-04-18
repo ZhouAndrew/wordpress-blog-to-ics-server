@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
 
-from .fetcher import PostData
+from .fetcher import PostData, normalize_post_date
 from .ics import generate_ics
 
 
@@ -16,7 +16,7 @@ def safe_slug(title: str, limit: int = 60) -> str:
 
 
 def build_output_filename(post: PostData) -> str:
-    date_part = post.post_date.split(" ")[0]
+    date_part = normalize_post_date(post.post_date)
     return f"{date_part}_post_{post.post_id}_{safe_slug(post.title)}.ics"
 
 
@@ -37,7 +37,7 @@ def write_publish_index(
     path.write_text(
         json.dumps(
             {
-                "generated_at": datetime.now(UTC).isoformat(),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
                 "recent_days": days,
                 "published_count": len(items),
                 "items": items,
@@ -58,7 +58,7 @@ def write_ignored_blocks(output_dir: str, ics_filename: str, ignored_blocks: lis
 
 def write_publish_index_html(output_dir: str, items: list[dict]) -> Path:
     path = Path(output_dir) / "index.html"
-    generated_at = datetime.now(UTC).isoformat()
+    generated_at = datetime.now(timezone.utc).isoformat()
     lines = [
         "<!doctype html>",
         "<html><head><meta charset='utf-8'><title>ICS Publish Index</title></head><body>",

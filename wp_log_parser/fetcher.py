@@ -22,12 +22,26 @@ class PostData:
 
 
 def _parse_post_date(value: str) -> datetime:
-    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+    raw = value.strip()
+    if not raw:
+        raise ValueError("post_date is empty")
+
+    iso_candidate = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+    try:
+        return datetime.fromisoformat(iso_candidate)
+    except ValueError:
+        pass
+
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
         try:
-            return datetime.strptime(value.strip(), fmt)
+            return datetime.strptime(raw, fmt)
         except ValueError:
             continue
     raise ValueError(f"Unsupported post_date format: {value}")
+
+
+def normalize_post_date(value: str) -> str:
+    return _parse_post_date(value).date().isoformat()
 
 
 def _fetch_post_wpcli(config: AppConfig, post_id: int) -> PostData:
