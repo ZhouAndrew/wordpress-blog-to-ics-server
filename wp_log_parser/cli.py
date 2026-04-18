@@ -3,21 +3,16 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 from .aliases import find_today_ics_candidates, generate_today_ics, select_today_ics, today_date_str
 from .config import config_exists, create_default_config, load_config, save_config
-from .fetcher import fetch_post, list_recent_post_ids, normalize_post_date
-from .ics import build_public_ics_url, generate_ics
-from .ics_exporter import (
-    write_ignored_blocks,
-    write_post_ics,
-    write_publish_index,
-    write_publish_index_html,
-)
+from .fetcher import fetch_post, normalize_post_date
+from .ics import generate_ics
+from .ics_exporter import write_post_ics
 from .parser import parse_post_content
 from .service import fetch_post as fetch_post_legacy, run_today_pipeline
+from .service_mode import publish_once, run_service_loop
 from .setup_wizard import run_setup_wizard, select_post_id
 from .validators import (
     validate_dependencies,
@@ -93,6 +88,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_update_today.add_argument("--mode", choices=["copy", "symlink"], default="copy")
     p_update_today.add_argument("--post-id", type=int)
     p_update_today.add_argument("--verbose", action="store_true")
+
+    p_run_service = sub.add_parser("run-ics-service")
+    p_run_service.add_argument("--config", default="./config.json")
+    p_run_service.add_argument("--days", type=int, default=7)
+    p_run_service.add_argument("--interval", type=int, default=60)
+    p_run_service.add_argument("--host", default="127.0.0.1")
+    p_run_service.add_argument("--port", type=int, default=5333)
+    p_run_service.add_argument("--verbose", action="store_true")
 
     return parser
 
@@ -195,72 +198,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "publish-ics":
-        post_ids = list_recent_post_ids(config, args.days)
-        output_dir = Path(config.output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        items = []
-        for post_id in post_ids:
-            post = fetch_post(config, post_id)
-            post_date = normalize_post_date(post.post_date)
-            parsed = parse_post_content(post.post_content, post_date, config, verbose=args.verbose)
-            if not parsed["entries"]:
-                if args.verbose:
-                    print(f"[WARN] Skipped post {post_id}: no valid timed entries")
-                continue
-            out_path = write_post_ics(post, parsed["entries"], config.output_dir, config.timezone)
-            if args.verbose:
-                print(f"[OK] Published post {post_id}: {out_path.name}")
-            if config.save_ignored_blocks:
-                ignored_path = write_ignored_blocks(config.output_dir, out_path.name, parsed["ignored_blocks"])
-                if args.verbose:
-                    print(f"[OK] Wrote ignored blocks: {ignored_path.name}")
-            items.append(
-                {
-                    "post_id": post.post_id,
-                    "title": post.title,
-                    "post_date": post.post_date,
-                    "ics_file": out_path.name,
-                    "ics_url": build_public_ics_url(config.ics_base_url, out_path.name),
-                    "entry_count": len(parsed["entries"]),
-                    "ignored_block_count": len(parsed["ignored_blocks"]),
-                }
-            )
-
-        items.sort(key=lambda x: x["post_date"], reverse=True)
-        index_path = write_publish_index(config.output_dir, items, args.days)
-        html_path = write_publish_index_html(config.output_dir, items)
-        today_refreshed = False
-        today_source = None
-        if items:
-            try:
-                today_target = generate_today_ics(config.output_dir, config.timezone)
-                today_candidates = find_today_ics_candidates(Path(config.output_dir), today_date_str(config.timezone))
-                today_source = select_today_ics(today_candidates).name
-                today_refreshed = True
-                if args.verbose:
-                    print(f"[OK] Refreshed today alias: {today_target.name}")
-            except Exception as exc:
-                if args.verbose:
-                    print(f"[WARN] Could not refresh today.ics automatically: {exc}")
-        if args.verbose:
-            print(f"[OK] Wrote publish index: {index_path}")
-            print(f"[OK] Wrote publish html: {html_path}")
-        print(
-            json.dumps(
-                {
-                    "generated_at": datetime.now(timezone.utc).isoformat(),
-                    "recent_days": args.days,
-                    "published_count": len(items),
-                    "index_json": str(index_path),
-                    "index_html": str(html_path),
-                    "today_refreshed": today_refreshed,
-                    "today_source_file": today_source,
-                    "items": items,
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
+        result = publish_once(config, days=args.days, verbose=args.verbose)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
 
     if args.command == "update-today-ics":
@@ -287,6 +226,17 @@ def main(argv: list[str] | None = None) -> int:
                 ensure_ascii=False,
                 indent=2,
             )
+        )
+        return 0
+
+    if args.command == "run-ics-service":
+        run_service_loop(
+            config=config,
+            days=args.days,
+            interval_seconds=args.interval,
+            host=args.host,
+            port=args.port,
+            verbose=args.verbose,
         )
         return 0
 

@@ -128,7 +128,11 @@ def list_recent_post_ids(config: AppConfig, days: int) -> list[int]:
         post_date = str(post.get("date", ""))
         if not post_date:
             continue
-        dt = _parse_post_date(post_date).replace(tzinfo=tz)
+        dt = _parse_post_date(post_date)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=tz)
+        else:
+            dt = dt.astimezone(tz)
         if dt >= cutoff:
             ids.append(int(post["id"]))
     return ids
