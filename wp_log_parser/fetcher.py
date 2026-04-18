@@ -103,7 +103,10 @@ def fetch_post(config: AppConfig, post_id: int) -> PostData:
 def list_recent_post_ids(config: AppConfig, days: int) -> list[int]:
     from .service import list_posts
 
-    tz = ZoneInfo(config.timezone)
+    try:
+        tz = ZoneInfo(config.timezone)
+    except Exception as exc:
+        raise ValueError(f"Invalid timezone: {config.timezone}") from exc
     now = datetime.now(tz)
     cutoff = now - timedelta(days=days)
     ids: list[int] = []

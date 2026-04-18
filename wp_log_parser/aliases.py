@@ -10,10 +10,18 @@ ICS_FILE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})_post_(\d+)_.*\.ics$")
 
 
 def today_date_str(timezone_name: str) -> str:
-    return datetime.now(ZoneInfo(timezone_name)).strftime("%Y-%m-%d")
+    try:
+        tz = ZoneInfo(timezone_name)
+    except Exception as exc:
+        raise ValueError(f"Invalid timezone: {timezone_name}") from exc
+    return datetime.now(tz).strftime("%Y-%m-%d")
 
 
 def find_today_ics_candidates(publish_dir: Path, today: str) -> list[Path]:
+    if not publish_dir.exists():
+        raise FileNotFoundError(f"Publish directory not found: {publish_dir}")
+    if not publish_dir.is_dir():
+        raise NotADirectoryError(f"Publish directory is not a directory: {publish_dir}")
     matches: list[Path] = []
     for path in publish_dir.iterdir():
         if not path.is_file():
@@ -44,6 +52,8 @@ def generate_today_ics(
     mode: str = "copy",
     target_name: str = "today.ics",
 ) -> Path:
+    if mode not in {"copy", "symlink"}:
+        raise ValueError(f"Invalid alias mode: {mode}. Expected 'copy' or 'symlink'.")
     root = Path(publish_dir)
     today = today_date_str(timezone_name)
     selected = select_today_ics(find_today_ics_candidates(root, today), preferred_post_id)

@@ -24,30 +24,36 @@ def parse_post_content(
 
     for index, (block_type, block_body) in enumerate(blocks, start=1):
         raw_p = paragraph_from_block(block_body)
-        if block_type != "paragraph" or not raw_p:
-            ignored_blocks.append({"type": f"wp:{block_type}", "reason": "not a paragraph or no valid time"})
+        if block_type != "paragraph":
+            ignored_blocks.append({"type": f"wp:{block_type}", "reason": "unsupported_block_type"})
             if verbose:
-                print(f"[DEBUG] Ignored block #{index}: wp:{block_type} (not paragraph/no valid time)")
+                print(f"[DEBUG] Ignored block #{index}: wp:{block_type} (unsupported block)")
+            continue
+
+        if not raw_p:
+            ignored_blocks.append({"type": "wp:paragraph", "reason": "empty_paragraph"})
+            if verbose:
+                print(f"[DEBUG] Ignored block #{index}: wp:paragraph (empty paragraph)")
             continue
 
         visible = strip_tags(raw_p)
         time_match = TIME_RE.match(visible)
         if not time_match:
-            ignored_blocks.append({"type": "wp:paragraph", "reason": "not a paragraph or no valid time"})
+            ignored_blocks.append({"type": "wp:paragraph", "reason": "no_leading_time"})
             if verbose:
                 print(f"[DEBUG] Ignored block #{index}: wp:paragraph (no leading time)")
             continue
 
         normalized = normalize_time(time_match.group(1), time_match.group(2))
         if normalized is None:
-            ignored_blocks.append({"type": "wp:paragraph", "reason": "not a paragraph or no valid time"})
+            ignored_blocks.append({"type": "wp:paragraph", "reason": "no_leading_time"})
             if verbose:
                 print(f"[DEBUG] Ignored block #{index}: wp:paragraph (invalid time)")
             continue
 
         summary = time_match.group(3).strip()
         if not summary and not config.allow_empty_summary:
-            ignored_blocks.append({"type": "wp:paragraph", "reason": "empty summary disallowed"})
+            ignored_blocks.append({"type": "wp:paragraph", "reason": "empty_summary"})
             if verbose:
                 print(f"[DEBUG] Ignored block #{index}: wp:paragraph (empty summary)")
             continue
