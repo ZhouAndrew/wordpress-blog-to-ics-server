@@ -45,6 +45,23 @@ def _print_validation(config) -> bool:
     return ok
 
 
+def _validate_update_today(config) -> bool:
+    output_check = validate_output_dir(config.output_dir)
+    status = "[OK]" if output_check.ok else "[ERROR]"
+    print(f"{status} {output_check.name}: {output_check.message}")
+    if not output_check.ok:
+        return False
+
+    try:
+        today_date_str(config.timezone)
+    except Exception as exc:
+        print(f"[ERROR] timezone: {exc}")
+        return False
+
+    print(f"[OK] timezone: {config.timezone}")
+    return True
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="wp_log_parser")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -120,9 +137,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "validate-config":
         return 0 if _print_validation(config) else 1
 
-    if not _print_validation(config):
-        print("Critical validation errors found. Aborting execution.")
-        return 1
+    if args.command == "update-today-ics":
+        if not _validate_update_today(config):
+            print("Critical validation errors found. Aborting execution.")
+            return 1
+    else:
+        if not _print_validation(config):
+            print("Critical validation errors found. Aborting execution.")
+            return 1
 
     if args.command == "fetch-post":
         if args.select_post_id and args.post_id is not None:
@@ -203,31 +225,35 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "update-today-ics":
-        today = today_date_str(config.timezone)
-        candidates = find_today_ics_candidates(Path(config.output_dir), today)
-        selected = select_today_ics(candidates, args.post_id)
-        target = generate_today_ics(
-            config.output_dir,
-            config.timezone,
-            preferred_post_id=args.post_id,
-            mode=args.mode,
-        )
-        if args.verbose:
-            print(f"[OK] Selected today's ICS: {selected.name}")
-            print(f"[OK] Updated alias: {target.name}")
-        print(
-            json.dumps(
-                {
-                    "today": today,
-                    "source_file": selected.name,
-                    "target_file": target.name,
-                    "mode": args.mode,
-                },
-                ensure_ascii=False,
-                indent=2,
+        try:
+            today = today_date_str(config.timezone)
+            candidates = find_today_ics_candidates(Path(config.output_dir), today)
+            selected = select_today_ics(candidates, args.post_id)
+            target = generate_today_ics(
+                config.output_dir,
+                config.timezone,
+                preferred_post_id=args.post_id,
+                mode=args.mode,
             )
-        )
-        return 0
+            if args.verbose:
+                print(f"[OK] Selected today's ICS: {selected.name}")
+                print(f"[OK] Updated alias: {target.name}")
+            print(
+                json.dumps(
+                    {
+                        "today": today,
+                        "source_file": selected.name,
+                        "target_file": target.name,
+                        "mode": args.mode,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0
+        except Exception as exc:
+            print(f"[ERROR] {exc}")
+            return 1
 
     if args.command == "run-ics-service":
         run_service_loop(
