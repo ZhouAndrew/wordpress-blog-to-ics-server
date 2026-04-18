@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Any
 
 from .exceptions import ConfigError
 
@@ -27,6 +28,7 @@ class AppConfig:
     allow_empty_summary: bool = False
     auto_cross_midnight: bool = True
     save_ignored_blocks: bool = True
+    custom_parsing_patterns: list[dict[str, Any] | str] = field(default_factory=list)
 
 
 def create_default_config() -> AppConfig:
@@ -70,5 +72,26 @@ def load_config(path: str) -> AppConfig:
         data["post_selection_count"] = int(data.get("post_selection_count", defaults.post_selection_count))
     except (TypeError, ValueError) as exc:
         raise ConfigError("post_selection_count must be an integer") from exc
+
+    patterns = data.get("custom_parsing_patterns", [])
+    if patterns is None:
+        patterns = []
+    if not isinstance(patterns, list):
+        raise ConfigError("custom_parsing_patterns must be a list")
+    normalized_patterns: list[dict[str, Any] | str] = []
+    for i, pattern in enumerate(patterns, start=1):
+        if isinstance(pattern, str):
+            normalized_patterns.append(pattern)
+            continue
+        if not isinstance(pattern, dict):
+            raise ConfigError(f"custom_parsing_patterns[{i}] must be string or object")
+        if "regex" not in pattern or not isinstance(pattern["regex"], str):
+            raise ConfigError(f"custom_parsing_patterns[{i}] object requires string field 'regex'")
+        kind = pattern.get("kind", "point")
+        if kind not in {"point", "range"}:
+            raise ConfigError(f"custom_parsing_patterns[{i}] kind must be 'point' or 'range'")
+        name = pattern.get("name") or f"custom_{i}"
+        normalized_patterns.append({"name": str(name), "regex": pattern["regex"], "kind": kind})
+    data["custom_parsing_patterns"] = normalized_patterns
 
     return AppConfig(**data)
