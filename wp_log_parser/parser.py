@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import asdict
-from typing import Any
-
 from .config import AppConfig
 from .line_patterns import parse_log_line
-from .models import IgnoredBlock, LogEntry
+from .models import IgnoredBlock, LogEntry, ParsedPost
 from .timeline import apply_timeline
 from .wordpress_blocks import iter_blocks
 
@@ -15,15 +12,7 @@ def parse_post_content(
     post_date: str,
     config: AppConfig,
     verbose: bool = False,
-) -> dict[str, Any]:
-    """Parse Gutenberg post content into a stable dictionary payload.
-
-    Canonical return type for now is a dict with JSON-serializable fields:
-    - post_date
-    - entries
-    - ignored_blocks
-    - warnings
-    """
+) -> ParsedPost:
     entries: list[LogEntry] = []
     ignored_blocks: list[IgnoredBlock] = []
 
@@ -50,7 +39,12 @@ def parse_post_content(
         visible = (block.visible_text or "").strip()
         if not visible:
             ignored_blocks.append(
-                IgnoredBlock(index=block.index, type="wp:paragraph", reason="empty_paragraph", raw=block.raw_paragraph_html or "")
+                IgnoredBlock(
+                    index=block.index,
+                    type="wp:paragraph",
+                    reason="empty_paragraph",
+                    raw=block.raw_paragraph_html or "",
+                )
             )
             if verbose:
                 print(f"[DEBUG] Ignored block #{block.index}: wp:paragraph (empty paragraph)")
@@ -59,7 +53,12 @@ def parse_post_content(
         parsed_line = parse_log_line(visible, config)
         if parsed_line is None:
             ignored_blocks.append(
-                IgnoredBlock(index=block.index, type="wp:paragraph", reason="no_leading_time", raw=block.raw_paragraph_html or "")
+                IgnoredBlock(
+                    index=block.index,
+                    type="wp:paragraph",
+                    reason="no_leading_time",
+                    raw=block.raw_paragraph_html or "",
+                )
             )
             if verbose:
                 print(f"[DEBUG] Ignored block #{block.index}: wp:paragraph (no leading time)")
@@ -68,7 +67,12 @@ def parse_post_content(
         summary = parsed_line.summary.strip()
         if not summary and not config.allow_empty_summary:
             ignored_blocks.append(
-                IgnoredBlock(index=block.index, type="wp:paragraph", reason="empty_summary", raw=block.raw_paragraph_html or "")
+                IgnoredBlock(
+                    index=block.index,
+                    type="wp:paragraph",
+                    reason="empty_summary",
+                    raw=block.raw_paragraph_html or "",
+                )
             )
             if verbose:
                 print(f"[DEBUG] Ignored block #{block.index}: wp:paragraph (empty summary)")
@@ -95,9 +99,9 @@ def parse_post_content(
         for warn in warnings:
             print(f"[WARN] {warn.message}")
 
-    return {
-        "post_date": post_date,
-        "entries": [asdict(entry) for entry in entries],
-        "ignored_blocks": [asdict(block) for block in ignored_blocks],
-        "warnings": [asdict(item) for item in warnings],
-    }
+    return ParsedPost(
+        post_date=post_date,
+        entries=entries,
+        ignored_blocks=ignored_blocks,
+        warnings=warnings,
+    )
