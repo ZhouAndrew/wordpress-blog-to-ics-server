@@ -1,358 +1,251 @@
-# WordPress Daily Log → ICS Exporter
+# WordPress Blog Log → ICS CLI
 
-This project parses daily logs stored in WordPress posts (Gutenberg format) and converts them into structured events and ready-to-publish ICS calendar files.
+Convert diary-style WordPress posts into timeline events and `.ics` calendar files.
 
-## ✨ Overview
+This project is for developers and power users who already work with WordPress and command-line workflows.
 
-Daily activities are recorded in WordPress posts as simple paragraph blocks:
+---
 
-```html
-<!-- wp:paragraph -->
-<p>07:45 Breakfast and baked pizza</p>
-<!-- /wp:paragraph -->
-```
+## Project Overview
 
-This project transforms those logs into calendar events by applying a simple rule:
+`wp_log_parser` is a command-line tool that:
 
-> **The end time of one event is the start time of the next event.**
+1. Fetches posts from WordPress (via **wp-cli** or **REST API**)
+2. Parses Gutenberg block content
+3. Extracts time-based log lines (for example, `07:45 Breakfast`)
+4. Builds structured timeline entries
+5. Exports ICS files you can subscribe to in calendar apps
 
-## 🧠 Core Concept
+Typical use cases:
 
-Logs are interpreted as a **sequence of time-based events**.
+- Personal daily log → calendar timeline
+- Local automation for publishing fresh ICS feeds
+- Stable `today.ics` URL for calendar subscriptions
 
-Example:
+---
 
-```text
-07:45 Breakfast
-08:30 Enabled Thunderbird
-```
+## Features
 
-Becomes:
+- Supports two fetch modes:
+  - `wpcli` (recommended when running on a host with WordPress + wp-cli)
+  - `rest` (recommended for remote access)
+- Parses Gutenberg post content for time-based entries
+- Supports point-in-time and range-style log entries
+- Exports valid ICS files per post
+- Generates index artifacts (`index.json`, `index.html`)
+- Maintains a stable `today.ics` alias for subscriptions
+- Includes a local HTTP service mode for continuous publishing
+- Configurable through `config.json` (including custom parsing patterns)
 
-| Event               | Start | End       |
-| ------------------- | ----- | --------- |
-| Breakfast           | 07:45 | 08:30     |
-| Enabled Thunderbird | 08:30 | (unknown) |
+---
 
-## 📥 Input Format
+## Requirements
 
-* Source: WordPress `post_content`
-* Format: Gutenberg blocks
-* Primary block used: `wp:paragraph`
+### Runtime
 
-## ✅ Log Detection Rules
+- Python **3.10+** (3.11 recommended)
+- `pip`
 
-A paragraph is considered a valid log entry if it starts with:
+### For `wpcli` mode
 
-* `H:MM` (example: `8:30`)
-* `HH:MM` (example: `07:45`)
+- `wp-cli` installed and available on PATH (or configured via `wp_cli_path`)
+- Local filesystem access to your WordPress installation
+- Valid WordPress root path (set as `wp_path`)
 
-Normalization:
+### For `rest` mode
 
-```text
-8:30 → 08:30
-```
+- Reachable WordPress site URL (`base_url`)
+- WordPress username
+- WordPress application password
 
-## ❌ Ignored Content
+---
 
-The following block types are ignored:
-
-* `wp:file`
-* `wp:image`
-* `wp:list`
-* `wp:heading`
-* paragraphs without a leading time
-
-## ⏱ Event Construction
-
-Events are built using sequential inference:
-
-```text
-event[i].end = event[i+1].start
-```
-
-The last event has no inferred end unless a fallback duration is configured.
-
-## 📤 Output Format
-
-### Structured parser output
-
-Default parser output contains:
-
-* `entries`
-* `ignored_blocks`
-* `ics_preview`
-
-Each entry includes:
-
-* `date`
-* `start_time`
-* `end_time` (or `null`)
-* `summary`
-* `raw`
-* `status` (`ready` or `needs_review`)
-
-### ICS export
-
-Generates valid `VCALENDAR` content with one `VEVENT` per parsed entry.
-
-## Local CLI Tooling
-
-The repository now includes a configurable local CLI package: `wp_log_parser/`.
-
-### Installation
+## Installation
 
 ```bash
+# 1) Clone repository
+git clone <your-repo-url>
+cd wordpress-blog-to-ics-server
+
+# 2) Create virtual environment
 python -m venv .venv
 source .venv/bin/activate
+
+# 3) Install dependencies
 pip install -U pip
 pip install requests pytest
 ```
 
-### Configuration wizard
+> If your environment already uses dependency management tooling, adapt accordingly.
+
+---
+
+## Configuration (`config.json`)
+
+Create config interactively (recommended):
 
 ```bash
 python -m wp_log_parser init-config --wizard --config ./config.json
 ```
 
-Wizard features:
-
-* numbered choices for enum prompts
-* `y/yes/n/no` support
-* Enter accepts defaults
-* immediate validation loops on invalid input
-* summary output with masked application password
-
-### Dependency checks
+Validate config and environment:
 
 ```bash
 python -m wp_log_parser validate-config --config ./config.json
 ```
 
-### wp-cli mode
+You can also start from `example.config.json`.
+
+### Common config fields
+
+- `wordpress_mode`: `wpcli` or `rest`
+- `wp_cli_path`: path/command for wp-cli (`wp`)
+- `wp_path`: WordPress install path (required for `wpcli` mode)
+- `base_url`: WordPress base URL (required for `rest` mode)
+- `username`, `app_password`: REST credentials
+- `output_dir`: generated files destination
+- `timezone`: timezone used for exported events
+- `default_last_event_minutes`: fallback duration for final event
+- `save_ignored_blocks`: write ignored block diagnostics
+- `custom_parsing_patterns`: optional custom regex parsing rules
+
+---
+
+## CLI Usage
+
+General help:
 
 ```bash
-python -m wp_log_parser fetch-post --config ./config.json --post-id 123
+python -m wp_log_parser --help
 ```
 
-### Interactive post selection
+### 1) Fetch a post
 
 ```bash
-python -m wp_log_parser fetch-post --config ./config.json --select-post-id
-```
-
-The number of posts returned in the interactive selector is controlled by `post_selection_count` in `config.json`.
-
-### REST mode
-
-```bash
-python -m wp_log_parser run-today --config ./config.json
-```
-
-### Example command set
-
-```bash
-python -m wp_log_parser init-config --wizard
-python -m wp_log_parser validate-config --config ./config.json
 python -m wp_log_parser fetch-post --config ./config.json --post-id 10213
-python -m wp_log_parser fetch-post --config ./config.json --select-post-id
-python -m wp_log_parser parse-post --config ./config.json --post-id 10213
-python -m wp_log_parser run-today --config ./config.json
 ```
 
-## Round 2 Commands
+Interactive selection from recent posts:
 
-### `post-to-ics`
+```bash
+python -m wp_log_parser fetch-post --config ./config.json --select-post-id
+```
 
-Export one specific post to one ICS file.
+### 2) Parse a post into structured timeline output
+
+```bash
+python -m wp_log_parser parse-post --config ./config.json --post-id 10213
+```
+
+### 3) Export one post to ICS
 
 ```bash
 python -m wp_log_parser post-to-ics --config ./config.json --post-id 10213
+```
+
+Verbose mode:
+
+```bash
 python -m wp_log_parser post-to-ics --config ./config.json --post-id 10213 --verbose
 ```
 
-What it does:
-
-1. fetches the post (`wp-cli` or REST, based on config),
-2. parses timed Gutenberg paragraph entries,
-3. writes one ICS file into `output_dir`.
-
-Generated files:
-
-* `YYYY-MM-DD_post_<post_id>_<slug>.ics`
-
----
-
-### `publish-ics`
-
-Publish all recent posts in the requested day window and build index artifacts.
+### 4) Publish ICS for recent posts
 
 ```bash
 python -m wp_log_parser publish-ics --config ./config.json --days 7
-python -m wp_log_parser publish-ics --config ./config.json --days 7 --verbose
 ```
 
-What it does:
-
-1. finds recent posts,
-2. parses each post into entries,
-3. writes one `.ics` per post,
-4. (optional) writes ignored block details per post when `save_ignored_blocks` is enabled,
-5. writes `index.json` and `index.html`,
-6. attempts to refresh `today.ics` automatically.
-
-Generated files (in `output_dir`):
-
-* `YYYY-MM-DD_post_<post_id>_<slug>.ics`
-* `YYYY-MM-DD_post_<post_id>_<slug>.ignored.json` (if enabled)
-* `index.json`
-* `index.html`
-* `today.ics` (best effort refresh after publish)
-
----
-
-### `update-today-ics`
-
-Refresh only the `today.ics` alias from existing published files.
+### 5) Refresh `today.ics`
 
 ```bash
 python -m wp_log_parser update-today-ics --config ./config.json
-python -m wp_log_parser update-today-ics --config ./config.json --mode symlink
-python -m wp_log_parser update-today-ics --config ./config.json --post-id 10213
 ```
 
-Notes:
+Use symlink mode:
 
-* this command validates only the output directory + timezone (it does not require wp-cli/REST connectivity),
-* it selects today’s candidate ICS file by date and optional `--post-id`,
-* `today.ics` is the recommended stable subscription target for clients.
+```bash
+python -m wp_log_parser update-today-ics --config ./config.json --mode symlink
+```
+
+### 6) Run the local ICS service
+
+```bash
+python -m wp_log_parser run-ics-service --config ./config.json --days 7 --interval 300 --host 127.0.0.1 --port 5333
+```
 
 ---
 
-### `run-ics-service`
+## Command Reference
 
-Run periodic publishing plus local static HTTP serving.
+- `init-config` – create config (optionally with interactive wizard)
+- `validate-config` – validate config and environment dependencies
+- `fetch-post` – fetch and display one post by ID
+- `parse-post` – parse one post and show structured entries
+- `export-ics` – generate ICS from existing entries JSON input
+- `run-today` – run the “today” flow from current configuration
+- `post-to-ics` – fetch + parse + export one post to ICS
+- `publish-ics` – generate ICS files for recent posts and index artifacts
+- `update-today-ics` – create/update `today.ics` alias
+- `run-ics-service` – periodic publish + static HTTP server
 
-```bash
-python -m wp_log_parser run-ics-service --config ./config.json --days 7 --interval 60
-python -m wp_log_parser run-ics-service --config ./config.json --days 7 --interval 300 --host 0.0.0.0 --port 5333 --verbose
-```
+---
 
-Service behavior:
+## Output Files
 
-1. runs one initial publish cycle,
-2. starts local HTTP server for `output_dir`,
-3. waits until the next interval boundary,
-4. runs publish cycles repeatedly with drift-aware scheduling.
+Depending on command and config, output can include:
 
-HTTP serving:
+- `YYYY-MM-DD_post_<post_id>_<slug>.ics`
+- `today.ics`
+- `index.json`
+- `index.html`
+- `*.ignored.json` (if ignored-block export enabled)
 
-* served directory: `output_dir` from config,
-* default bind: `127.0.0.1:5333`,
-* all generated `.ics`, `.ignored.json`, `index.json`, `index.html`, `today.ics` are served as static files.
+---
 
-## Thunderbird Subscription
+## Troubleshooting
 
-Recommended target:
+### `wp-cli not found`
 
-* Subscribe to `today.ics` (stable URL), not per-post filenames.
+- Confirm `wp` is installed: `wp --info`
+- Set `wp_cli_path` explicitly in `config.json`
 
-Example URLs (depending on your local/public setup):
+### `Path exists but does not look like WordPress`
 
-* `http://127.0.0.1:5333/today.ics`
-* `https://your-domain.example/calendars/today.ics`
+- Verify `wp_path` points to your real WordPress root (where `wp-config.php` is located)
 
-In Thunderbird (high-level flow):
+### REST authentication errors (401/403)
 
-1. **File** → **New** → **Calendar**
-2. choose **On the Network**
-3. paste the `today.ics` URL
-4. finish setup (name/color/refresh policy)
+- Confirm `base_url` is correct
+- Recreate WordPress application password
+- Ensure username has permission to read posts
 
-Why `today.ics`:
+### No entries parsed from a post
 
-* per-post filenames change by date/post,
-* `today.ics` stays stable and is refreshed by publish/update workflows.
+- Confirm your log lines begin with `H:MM` or `HH:MM`
+- Verify logs are in Gutenberg paragraph content
+- Check whether custom parsing patterns are too strict
 
-## Architecture Summary
+### `today.ics` missing after publish
 
-Core modules used by CLI/service mode:
+- Run manually: `python -m wp_log_parser update-today-ics --config ./config.json`
+- Confirm there is at least one eligible `.ics` file in `output_dir`
 
-* `fetcher`  
-  Fetches post metadata/content from `wp-cli` or REST and normalizes post dates.
-* `parser`  
-  Extracts timed events from Gutenberg blocks and builds structured entries + ignored-block diagnostics.
-* `ics_exporter`  
-  Writes per-post ICS files plus `index.json`, `index.html`, and optional `.ignored.json`.
-* `aliases`  
-  Selects today's candidate ICS and writes `today.ics` via copy/symlink.
-* `service_mode`  
-  Runs one-shot publish cycles (`publish_once`), periodic loop scheduling, and local HTTP serving.
+### Command seems to run but no files appear
 
-### Sample interactive wizard session
+- Verify `output_dir` in `config.json`
+- Use verbose command variants where available
+- Check whether the selected post actually contains timed log entries
 
-```text
-Welcome to wp_log_parser setup wizard
+---
 
-1) Fetch mode
-Choose how to fetch posts.
-  1) wpcli
-  2) rest
-[default: 1]
-> 2
+## Getting Started Guide
 
-2) WordPress base URL
-Example: https://example.com [default: ]
-> https://blog.local
+For a step-by-step setup and first run walkthrough, see:
 
-Username
-WordPress username for REST API. [default: ]
-> andrew
+- [Getting Started](./GETTING_STARTED.md)
 
-Application password
-WordPress application password. [default: ]
-> ********
+---
 
-8) Environment validation
-[OK] module:json: Module available
-[ERROR] rest: REST endpoint unreachable (401)
+## License
 
-Configuration summary:
-  - wordpress_mode: rest
-  - app_password: an********rd
-```
-
-### Config reference
-
-See `example.config.json` for complete field reference.
-
-Custom parsing patterns (`custom_parsing_patterns`) support two forms:
-
-1. **String regex** (backward-compatible)  
-   Treated as `kind=point`.
-2. **Object**:
-
-```json
-{
-  "name": "range_with_label",
-  "kind": "range",
-  "regex": "^(?P<start>\\d{2}:\\d{2})\\s*to\\s*(?P<end>\\d{2}:\\d{2})\\s+(?P<summary>.+)$"
-}
-```
-
-Required named groups:
-
-* `start` (required always)
-* `end` (required when `kind=range`)
-* `summary` (optional; empty summary rules still apply)
-
-### Troubleshooting
-
-* `wp-cli not found`: set `wp_cli_path`.
-* `Path exists but does not look like WordPress`: fix `wp_path`.
-* `REST authentication failed`: verify username + application password.
-* Validation is read-only and does not mutate `config.json`.
-
-## 📄 License
-
-MIT (or your choice)
+MIT
