@@ -37,17 +37,17 @@ def publish_once(config: AppConfig, days: int, verbose: bool = False) -> dict[st
         post = fetch_post(config, post_id)
         post_date = normalize_post_date(post.post_date)
         parsed = parse_post_content(post.post_content, post_date, config, verbose=verbose)
-        if not parsed["entries"]:
+        if not parsed.entries:
             if verbose:
                 print(f"[WARN] Skipped post {post_id}: no valid timed entries")
             continue
 
-        out_path = write_post_ics(post, parsed["entries"], config.output_dir, config.timezone)
+        out_path = write_post_ics(post, parsed.entries, config.output_dir, config.timezone)
         if verbose:
             print(f"[OK] Published post {post_id}: {out_path.name}")
 
         if config.save_ignored_blocks:
-            ignored_path = write_ignored_blocks(config.output_dir, out_path.name, parsed["ignored_blocks"])
+            ignored_path = write_ignored_blocks(config.output_dir, out_path.name, parsed.ignored_blocks)
             if verbose:
                 print(f"[OK] Wrote ignored blocks: {ignored_path.name}")
 
@@ -58,8 +58,8 @@ def publish_once(config: AppConfig, days: int, verbose: bool = False) -> dict[st
                 "post_date": post.post_date,
                 "ics_file": out_path.name,
                 "ics_url": build_public_ics_url(config.ics_base_url, out_path.name),
-                "entry_count": len(parsed["entries"]),
-                "ignored_block_count": len(parsed["ignored_blocks"]),
+                "entry_count": len(parsed.entries),
+                "ignored_block_count": len(parsed.ignored_blocks),
             }
         )
 

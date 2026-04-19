@@ -33,7 +33,7 @@ def publish_post(config: AppConfig, post_id: int, verbose: bool = False) -> dict
             print(f"[WARN] Skipped post {post_id}: no valid timed entries")
         return None
 
-    out_path = write_post_ics(post, parsed, config.output_dir, config.timezone)
+    out_path = write_post_ics(post, parsed.entries, config.output_dir, config.timezone)
     if verbose:
         print(f"[OK] Published post {post_id}: {out_path.name}")
 

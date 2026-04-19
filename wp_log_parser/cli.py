@@ -179,8 +179,8 @@ def main(argv: list[str] | None = None) -> int:
         post_id, content = fetch_post_legacy(config, post_id)
         from datetime import date
         parsed = parse_post_content(content, date.today().isoformat(), config)
-        parsed["post_id"] = post_id
-        print(json.dumps(parsed, ensure_ascii=False, indent=2))
+        parsed.post_id = post_id
+        print(json.dumps(parsed.to_dict(include_ignored=True), ensure_ascii=False, indent=2))
         return 0
 
     if args.command == "export-ics":
@@ -196,11 +196,10 @@ def main(argv: list[str] | None = None) -> int:
         post = fetch_post(config, args.post_id)
         post_date = normalize_post_date(post.post_date)
         parsed = parse_post_content(post.post_content, post_date, config, verbose=args.verbose)
-        parsed["ics_preview"] = generate_ics(parsed["entries"], timezone=config.timezone)
-        if not parsed["entries"]:
+        if not parsed.entries:
             print("No valid timed log entries found in post.")
             return 1
-        out_path = write_post_ics(post, parsed["entries"], config.output_dir, config.timezone)
+        out_path = write_post_ics(post, parsed.entries, config.output_dir, config.timezone)
         if args.verbose:
             print(f"[OK] Wrote ICS file: {out_path}")
         print(
@@ -210,8 +209,8 @@ def main(argv: list[str] | None = None) -> int:
                     "title": post.title,
                     "post_date": post.post_date,
                     "output_file": str(out_path),
-                    "entry_count": len(parsed["entries"]),
-                    "ignored_block_count": len(parsed["ignored_blocks"]),
+                    "entry_count": len(parsed.entries),
+                    "ignored_block_count": len(parsed.ignored_blocks),
                 },
                 ensure_ascii=False,
                 indent=2,
