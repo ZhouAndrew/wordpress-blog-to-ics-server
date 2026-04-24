@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timedelta, timezone as dt_timezone
+from datetime import datetime, timezone as dt_timezone
 from typing import Any
 
 
@@ -31,40 +31,17 @@ def build_public_ics_url(ics_base_url: str, filename: str) -> str | None:
     return f"{ics_base_url.rstrip('/')}/{filename.lstrip('/')}"
 
 
-def _roll_forward_until_not_before(candidate: datetime, threshold: datetime) -> datetime:
-    while candidate < threshold:
-        candidate += timedelta(days=1)
-    return candidate
+def _coerce_datetime(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        return datetime.fromisoformat(value)
+    raise TypeError(f"Unsupported datetime value: {type(value)!r}")
 
 
-def _resolve_event_datetimes(entries: list[Any]) -> list[tuple[datetime, datetime | None]]:
-    resolved: list[tuple[datetime, datetime | None]] = []
-    previous_start: datetime | None = None
-
-    for entry in entries:
-        start_dt = datetime.strptime(
-            f"{_entry_value(entry, 'date')} {_entry_value(entry, 'start_time')}",
-            "%Y-%m-%d %H:%M",
-        )
-
-        if previous_start is not None:
-            start_dt = _roll_forward_until_not_before(start_dt, previous_start)
-
-        end_dt: datetime | None = None
-        if _entry_value(entry, "end_time"):
-            end_dt = datetime.strptime(
-                f"{_entry_value(entry, 'date')} {_entry_value(entry, 'end_time')}",
-                "%Y-%m-%d %H:%M",
-            )
-            end_dt = _roll_forward_until_not_before(end_dt, start_dt)
-
-        resolved.append((start_dt, end_dt))
-        previous_start = start_dt
-
-    return resolved
-
-
-def generate_ics(entries: list[dict], timezone: str = "UTC") -> str:
+def generate_ics(entries: list[Any], timezone: str = "UTC") -> str:
     dtstamp = datetime.now(dt_timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     lines = [
         "BEGIN:VCALENDAR",
@@ -74,7 +51,11 @@ def generate_ics(entries: list[dict], timezone: str = "UTC") -> str:
         "METHOD:PUBLISH",
     ]
 
-    for entry, (start_dt, end_dt) in zip(entries, _resolve_event_datetimes(entries)):
+    for entry in entries:
+        start_dt = _coerce_datetime(_entry_value(entry, "start_dt"))
+        if start_dt is None:
+            raise ValueError("Each entry must include start_dt for ICS serialization.")
+        end_dt = _coerce_datetime(_entry_value(entry, "end_dt"))
         lines.extend(
             [
                 "BEGIN:VEVENT",

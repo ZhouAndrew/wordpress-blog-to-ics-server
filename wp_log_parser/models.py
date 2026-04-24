@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Optional
 
 
@@ -21,6 +22,21 @@ class LogEntry:
     raw: str
     status: str
     source_id: Optional[str] = None
+    start_dt: datetime | None = None
+    end_dt: datetime | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "date": self.date,
+            "start_time": self.start_time,
+            "end_time": self.end_time,
+            "start_dt": self.start_dt.isoformat() if self.start_dt else None,
+            "end_dt": self.end_dt.isoformat() if self.end_dt else None,
+            "summary": self.summary,
+            "raw": self.raw,
+            "status": self.status,
+            "source_id": self.source_id,
+        }
 
 
 @dataclass
@@ -54,7 +70,7 @@ class ParsedPost:
             "post_id": self.post_id,
             "source_id": self.source_id,
             "managed_by": self.managed_by,
-            "entries": [asdict(entry) for entry in self.entries],
-            "ignored_blocks": [asdict(block) for block in self.ignored_blocks] if include_ignored else [],
-            "warnings": [asdict(item) for item in self.warnings],
+            "entries": [entry.to_dict() for entry in self.entries],
+            "ignored_blocks": [block.__dict__ for block in self.ignored_blocks] if include_ignored else [],
+            "warnings": [item.__dict__ for item in self.warnings],
         }
