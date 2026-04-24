@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import datetime
 
 from wp_log_parser import cli
 from wp_log_parser.config import AppConfig
@@ -19,6 +20,8 @@ def _sample_parsed_post() -> ParsedPost:
                 summary="Breakfast",
                 raw="<p>07:45 Breakfast</p>",
                 status="ready",
+                start_dt=datetime(2026, 4, 11, 7, 45),
+                end_dt=datetime(2026, 4, 11, 8, 0),
             )
         ],
         ignored_blocks=[IgnoredBlock(index=3, type="wp:image", reason="unsupported_block_type", raw="<figure />")],

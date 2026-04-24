@@ -10,10 +10,12 @@ from .config import config_exists, create_default_config, load_config, save_conf
 from .fetcher import fetch_post, normalize_post_date
 from .ics import generate_ics
 from .ics_exporter import write_post_ics
+from .models import LogEntry
 from .parser import parse_post_content
 from .service import fetch_post as fetch_post_legacy, run_today_pipeline
 from .service_mode import publish_once, run_service_loop
 from .setup_wizard import run_setup_wizard, select_post_id
+from .timeline import apply_timeline
 from .validators import (
     validate_dependencies,
     validate_output_dir,
@@ -176,15 +178,32 @@ def main(argv: list[str] | None = None) -> int:
                 print("Interactive post selection requires a TTY.")
                 return 2
             post_id = select_post_id(config)
-        post_id, content = fetch_post_legacy(config, post_id)
-        from datetime import date
-        parsed = parse_post_content(content, date.today().isoformat(), config)
-        parsed.post_id = post_id
+        post = fetch_post(config, post_id)
+        post_date = normalize_post_date(post.post_date)
+        parsed = parse_post_content(post.post_content, post_date, config)
+        parsed.post_id = post.post_id
         print(json.dumps(parsed.to_dict(include_ignored=True), ensure_ascii=False, indent=2))
         return 0
 
     if args.command == "export-ics":
         entries = json.loads(Path(args.entries_json).read_text(encoding="utf-8"))
+        if entries and any(not item.get("start_dt") for item in entries):
+            timeline_entries, _ = apply_timeline(
+                [
+                    LogEntry(
+                        date=item["date"],
+                        start_time=item["start_time"],
+                        end_time=item.get("end_time"),
+                        summary=item.get("summary", ""),
+                        raw=item.get("raw", ""),
+                        status=item.get("status", "needs_review"),
+                        source_id=item.get("source_id"),
+                    )
+                    for item in entries
+                ],
+                config,
+            )
+            entries = [entry.to_dict() for entry in timeline_entries]
         print(generate_ics(entries, timezone=config.timezone))
         return 0
 

@@ -234,6 +234,7 @@ def run_setup_wizard(config_path: str) -> AppConfig:
 
 
 def select_post_id(config: AppConfig, per_page: int | None = None) -> int:
+    per_page = config.post_selection_count if per_page is None else per_page
     posts = list_posts(config, per_page=per_page)
     if not posts:
         raise ValueError("No posts found for interactive selection")

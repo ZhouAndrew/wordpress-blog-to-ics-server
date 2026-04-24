@@ -5,7 +5,16 @@ from wp_log_parser.parser import parse_post_content
 
 
 def test_generate_ics_timezone_argument_does_not_shadow_datetime_timezone() -> None:
-    entries = [{"date": "2026-04-11", "start_time": "07:45", "end_time": "08:00", "summary": "Breakfast"}]
+    entries = [
+        {
+            "date": "2026-04-11",
+            "start_time": "07:45",
+            "end_time": "08:00",
+            "start_dt": "2026-04-11T07:45:00",
+            "end_dt": "2026-04-11T08:00:00",
+            "summary": "Breakfast",
+        }
+    ]
 
     ics = generate_ics(entries, timezone="Asia/Seoul")
 
@@ -40,9 +49,12 @@ def test_parse_post_content_returns_parsed_post_and_handles_range_and_point() ->
     assert len(parsed.entries) == 2
     assert parsed.entries[0].start_time == "18:00"
     assert parsed.entries[0].end_time == "18:23"  # explicit range is preserved
+    assert parsed.entries[0].start_dt is not None
+    assert parsed.entries[0].end_dt is not None
     assert parsed.entries[0].status == "ready"
     assert parsed.entries[1].start_time == "18:40"
     assert parsed.entries[1].end_time is None
+    assert parsed.entries[1].start_dt is not None
     assert parsed.entries[1].status == "needs_review"
 
     reasons = {item.reason for item in parsed.ignored_blocks}
