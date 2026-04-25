@@ -108,6 +108,10 @@ You can also start from `example.config.json`.
 - `default_last_event_minutes`: fallback duration for final event
 - `save_ignored_blocks`: write ignored block diagnostics
 - `custom_parsing_patterns`: optional custom regex parsing rules
+- `caldav_url`: CalDAV collection URL (for `sync-caldav`)
+- `caldav_username`, `caldav_password`: CalDAV credentials
+- `caldav_uid_domain`: UID suffix domain for event resources
+- `caldav_index_path`: local sync index JSON file path
 
 ---
 
@@ -173,6 +177,24 @@ python -m wp_log_parser update-today-ics --config ./config.json --mode symlink
 python -m wp_log_parser run-ics-service --config ./config.json --days 7 --interval 300 --host 127.0.0.1 --port 5333
 ```
 
+### 7) Incremental CalDAV sync
+
+```bash
+python -m wp_log_parser sync-caldav --config ./config.json
+```
+
+Dry-run (report changes without writing to CalDAV or the index file):
+
+```bash
+python -m wp_log_parser sync-caldav --config ./config.json --dry-run
+```
+
+UID behavior in v1:
+
+- UIDs are stable across insertion of unrelated entries.
+- If an entry start time changes, identity changes too, so sync performs **delete + create** (not in-place move/update).
+- This behavior is expected/accepted for v1.
+
 ---
 
 ## Command Reference
@@ -187,6 +209,9 @@ python -m wp_log_parser run-ics-service --config ./config.json --days 7 --interv
 - `publish-ics` – generate ICS files for recent posts and index artifacts
 - `update-today-ics` – create/update `today.ics` alias
 - `run-ics-service` – periodic publish + static HTTP server
+- `sync-caldav` – incremental event-level CalDAV synchronization
+
+> Note: removed events currently use CalDAV `DELETE` (not `STATUS:CANCELLED`). For stricter clients/servers, future tombstone/CANCELLED handling may be needed.
 
 ---
 

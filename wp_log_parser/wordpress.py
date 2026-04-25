@@ -77,7 +77,13 @@ def find_today_post_id_wpcli(wp_path: str, wp_cli_path: str = "wp") -> int:
     return int(rows[0]["ID"])
 
 
-def list_posts_wpcli(wp_path: str, wp_cli_path: str = "wp", per_page: int = 20, limit: int | None = None) -> list[dict[str, str | int]]:
+def list_posts_wpcli(
+    wp_path: str,
+    wp_cli_path: str = "wp",
+    per_page: int = 20,
+    limit: int | None = None,
+    page: int = 1,
+) -> list[dict[str, str | int]]:
     if shutil.which(wp_cli_path) is None:
         raise WPCLIUnavailableError(f"wp-cli command not found: {wp_cli_path}")
     if not Path(wp_path).exists():
@@ -91,10 +97,11 @@ def list_posts_wpcli(wp_path: str, wp_cli_path: str = "wp", per_page: int = 20, 
         "--post_status=any",
         "--orderby=date",
         "--order=asc",
-        "--fields=ID,post_title,post_date,post_status",
+        "--fields=ID,post_title,post_date,post_modified_gmt,post_status",
         f"--format=json",
         f"--path={wp_path}",
         f"--posts_per_page={per_page}",
+        f"--paged={page}",
     ]
     proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
     if proc.returncode != 0:
@@ -111,6 +118,7 @@ def list_posts_wpcli(wp_path: str, wp_cli_path: str = "wp", per_page: int = 20, 
             "title": row.get("post_title", "") or "",
             "date": row.get("post_date", "") or "",
             "status": row.get("post_status", "") or "",
+            "modified_gmt": row.get("post_modified_gmt", "") or "",
         }
         for row in rows
     ]
@@ -153,6 +161,7 @@ def list_posts_rest(
     verify_ssl: bool = True,
     per_page: int = 20,
     limit: int | None = None,
+    page: int = 1,
 ) -> list[dict[str, str | int]]:
     try:
         import requests
@@ -160,7 +169,10 @@ def list_posts_rest(
         raise MalformedResponseError("requests package is required for REST mode") from exc
 
     endpoint = (
-        f"{base_url.rstrip('/')}/wp-json/wp/v2/posts?context=edit&status=any&orderby=date&order=asc&per_page={per_page}"
+        f"{base_url.rstrip('/')}/wp-json/wp/v2/posts"
+        f"?context=edit&status=any&orderby=date&order=asc"
+        f"&per_page={per_page}&page={page}"
+        "&_fields=id,title,date,modified_gmt,status"
     )
     response = requests.get(endpoint, auth=(username, app_password), verify=verify_ssl, timeout=20)
 
@@ -184,6 +196,7 @@ def list_posts_rest(
                 "title": title,
                 "date": item.get("date", "") or "",
                 "status": item.get("status", "") or "",
+                "modified_gmt": item.get("modified_gmt", "") or "",
             }
         )
     return sort_and_limit_posts(posts, limit=limit)
