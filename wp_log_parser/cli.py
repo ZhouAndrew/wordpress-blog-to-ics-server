@@ -15,8 +15,10 @@ from .parser import parse_post_content
 from .service import fetch_post as fetch_post_legacy, run_today_pipeline
 from .service_mode import publish_once, run_service_loop
 from .setup_wizard import run_setup_wizard, select_post_id
+from .sync import run_caldav_sync
 from .timeline import apply_timeline
 from .validators import (
+    validate_caldav_config,
     validate_dependencies,
     validate_output_dir,
     validate_python_path,
@@ -26,7 +28,7 @@ from .validators import (
 )
 
 
-def _print_validation(config) -> bool:
+def _print_validation(config, *, require_caldav: bool = False) -> bool:
     checks = []
     checks.extend(validate_dependencies())
     checks.append(validate_python_path(config.python_path))
@@ -37,6 +39,16 @@ def _print_validation(config) -> bool:
         checks.append(validate_wordpress_path(config.wp_path))
     else:
         checks.append(validate_rest_credentials(config.base_url, config.username, config.app_password, config.verify_ssl))
+    checks.append(
+        validate_caldav_config(
+            config.caldav_url,
+            config.caldav_username,
+            config.caldav_password,
+            config.caldav_uid_domain,
+            config.caldav_index_path,
+            required=require_caldav,
+        )
+    )
 
     ok = True
     for c in checks:
@@ -116,6 +128,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_run_service.add_argument("--port", type=int, default=5333)
     p_run_service.add_argument("--verbose", action="store_true")
 
+    p_sync_caldav = sub.add_parser("sync-caldav")
+    p_sync_caldav.add_argument("--config", default="./config.json")
+    p_sync_caldav.add_argument("--dry-run", action="store_true")
+
     return parser
 
 
@@ -144,7 +160,11 @@ def main(argv: list[str] | None = None) -> int:
             print("Critical validation errors found. Aborting execution.")
             return 1
     else:
-        if not _print_validation(config):
+        if args.command == "sync-caldav":
+            ok = _print_validation(config, require_caldav=True)
+        else:
+            ok = _print_validation(config)
+        if not ok:
             print("Critical validation errors found. Aborting execution.")
             return 1
 
@@ -282,6 +302,11 @@ def main(argv: list[str] | None = None) -> int:
             port=args.port,
             verbose=args.verbose,
         )
+        return 0
+
+    if args.command == "sync-caldav":
+        result = run_caldav_sync(config, dry_run=args.dry_run)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
 
     return 0

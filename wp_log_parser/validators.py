@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -70,3 +71,38 @@ def validate_dependencies() -> list[ValidationResult]:
             ValidationResult(ok, f"module:{module}", "Module available" if ok else "Module missing", None)
         )
     return checks
+
+
+def validate_caldav_config(
+    caldav_url: str,
+    caldav_username: str,
+    caldav_password: str,
+    caldav_uid_domain: str,
+    caldav_index_path: str,
+    *,
+    required: bool = True,
+) -> ValidationResult:
+    if not required and not caldav_url and not caldav_username and not caldav_password:
+        return ValidationResult(True, "caldav", "CalDAV settings are optional for this command", None)
+
+    if not caldav_url.startswith(("http://", "https://")):
+        return ValidationResult(False, "caldav", "caldav_url must start with http:// or https://", caldav_url)
+    if not caldav_username:
+        return ValidationResult(False, "caldav", "caldav_username is required", None)
+    if not caldav_password:
+        return ValidationResult(False, "caldav", "caldav_password is required", None)
+    if not caldav_uid_domain:
+        return ValidationResult(False, "caldav", "caldav_uid_domain is required", None)
+    if not re.match(r"^[A-Za-z0-9.-]+$", caldav_uid_domain):
+        return ValidationResult(False, "caldav", "caldav_uid_domain contains invalid characters", caldav_uid_domain)
+    if not caldav_index_path:
+        return ValidationResult(False, "caldav", "caldav_index_path is required", None)
+
+    idx_path = Path(caldav_index_path)
+    parent = idx_path.parent if idx_path.parent != Path("") else Path(".")
+    try:
+        parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return ValidationResult(False, "caldav", "Cannot create caldav index directory", str(exc))
+
+    return ValidationResult(True, "caldav", "CalDAV sync configuration looks valid", str(idx_path))
