@@ -234,7 +234,16 @@ def test_run_caldav_sync_dry_run_never_uses_requests_transport(monkeypatch) -> N
     )
     monkeypatch.setattr(
         "wp_log_parser.sync.caldav_sync.sync_caldav_once",
-        lambda *_args, **kwargs: {"created": 0, "updated": 0, "deleted": 0, "changed_posts": 0, "dry_run": True},
+        lambda *_args, **kwargs: {
+            "created": 0,
+            "updated": 0,
+            "deleted": 0,
+            "cancelled": 0,
+            "skipped": 0,
+            "changed_posts": 0,
+            "dry_run": True,
+            "index_path": "sync-index.json",
+        },
     )
 
     result = run_caldav_sync(config, dry_run=True)
@@ -498,3 +507,201 @@ def test_cancel_mode_is_idempotent_on_second_run(tmp_path, monkeypatch) -> None:
     assert third["cancelled"] == 0
     assert third["updated"] == 0
     assert third["deleted"] == 0
+
+
+def test_cancel_mode_whole_post_removal_is_idempotent(tmp_path, monkeypatch) -> None:
+    config = AppConfig(timezone="UTC", default_last_event_minutes=0, caldav_deletion_mode="cancel")
+    transport = FakeTransport()
+    idx_path = tmp_path / "sync-index.json"
+
+    state = {"present": True}
+
+    def list_meta(_config: AppConfig):
+        if state["present"]:
+            return [{"id": 10, "date": "2026-04-01 00:00:00", "modified_gmt": "2026-04-01 10:00:00"}]
+        return []
+
+    def fetch(_config: AppConfig, post_id: int):
+        assert post_id == 10
+        return PostData(
+            post_id=10,
+            title="day",
+            post_date="2026-04-01 00:00:00",
+            post_content=_post_content("07:45 Breakfast", "08:30 Work"),
+            status="publish",
+        )
+
+    monkeypatch.setattr("wp_log_parser.sync.caldav_sync._list_post_metadata", list_meta)
+    monkeypatch.setattr("wp_log_parser.sync.caldav_sync.fetch_post", fetch)
+
+    first = sync_caldav_once(config, index_path=idx_path, uid_domain="example.com", transport=transport)
+    assert first["created"] == 2
+
+    state["present"] = False
+    second = sync_caldav_once(config, index_path=idx_path, uid_domain="example.com", transport=transport)
+    assert second["cancelled"] == 2
+    assert second["deleted"] == 0
+    assert transport.deletes == []
+
+    index_second = SyncIndex.load(idx_path)
+    assert "10" not in index_second.posts
+    assert index_second.events["wp-10-20260401T074500Z-1@example.com"].status == "cancelled"
+    assert index_second.events["wp-10-20260401T083000Z-1@example.com"].status == "cancelled"
+
+    third = sync_caldav_once(config, index_path=idx_path, uid_domain="example.com", transport=transport)
+    assert third["cancelled"] == 0
+    assert third["updated"] == 0
+    assert third["deleted"] == 0
+    assert third["skipped"] == 0
+    assert third["created"] == 0
+
+
+def test_cancel_mode_removed_event_dry_run_does_not_write_transport_or_index(tmp_path, monkeypatch) -> None:
+    config = AppConfig(timezone="UTC", default_last_event_minutes=0, caldav_deletion_mode="cancel")
+    idx_path = tmp_path / "sync-index.json"
+    setup_transport = FakeTransport()
+    dry_transport = FakeTransport()
+
+    state = {"modified": "2026-04-01 10:00:00", "content": _post_content("07:45 Breakfast", "08:30 Work")}
+
+    def list_meta(_config: AppConfig):
+        return [{"id": 10, "date": "2026-04-01 00:00:00", "modified_gmt": state["modified"]}]
+
+    def fetch(_config: AppConfig, _post_id: int):
+        return PostData(
+            post_id=10,
+            title="day",
+            post_date="2026-04-01 00:00:00",
+            post_content=state["content"],
+            status="publish",
+        )
+
+    monkeypatch.setattr("wp_log_parser.sync.caldav_sync._list_post_metadata", list_meta)
+    monkeypatch.setattr("wp_log_parser.sync.caldav_sync.fetch_post", fetch)
+
+    sync_caldav_once(config, index_path=idx_path, uid_domain="example.com", transport=setup_transport)
+    before = idx_path.read_text(encoding="utf-8")
+    state["modified"] = "2026-04-02 10:00:00"
+    state["content"] = _post_content("07:45 Breakfast")
+
+    result = sync_caldav_once(config, index_path=idx_path, uid_domain="example.com", transport=dry_transport, dry_run=True)
+    assert result["cancelled"] == 1
+    assert dry_transport.puts == []
+    assert dry_transport.deletes == []
+    assert idx_path.read_text(encoding="utf-8") == before
+
+
+def test_cancel_mode_restore_dry_run_does_not_write_transport_or_index(tmp_path, monkeypatch) -> None:
+    config = AppConfig(timezone="UTC", default_last_event_minutes=0, caldav_deletion_mode="cancel")
+    idx_path = tmp_path / "sync-index.json"
+    setup_transport = FakeTransport()
+    dry_transport = FakeTransport()
+
+    state = {"modified": "2026-04-01 10:00:00", "content": _post_content("07:45 Breakfast", "08:30 Work")}
+
+    def list_meta(_config: AppConfig):
+        return [{"id": 10, "date": "2026-04-01 00:00:00", "modified_gmt": state["modified"]}]
+
+    def fetch(_config: AppConfig, _post_id: int):
+        return PostData(
+            post_id=10,
+            title="day",
+            post_date="2026-04-01 00:00:00",
+            post_content=state["content"],
+            status="publish",
+        )
+
+    monkeypatch.setattr("wp_log_parser.sync.caldav_sync._list_post_metadata", list_meta)
+    monkeypatch.setattr("wp_log_parser.sync.caldav_sync.fetch_post", fetch)
+
+    sync_caldav_once(config, index_path=idx_path, uid_domain="example.com", transport=setup_transport)
+    state["modified"] = "2026-04-02 10:00:00"
+    state["content"] = _post_content("07:45 Breakfast")
+    sync_caldav_once(config, index_path=idx_path, uid_domain="example.com", transport=setup_transport)
+
+    before = idx_path.read_text(encoding="utf-8")
+    state["modified"] = "2026-04-03 10:00:00"
+    state["content"] = _post_content("07:45 Breakfast", "08:30 Work")
+    result = sync_caldav_once(config, index_path=idx_path, uid_domain="example.com", transport=dry_transport, dry_run=True)
+    assert result["updated"] >= 1
+    assert dry_transport.puts == []
+    assert dry_transport.deletes == []
+    assert idx_path.read_text(encoding="utf-8") == before
+
+
+def test_cancel_mode_stale_post_removal_dry_run_does_not_write_transport_or_index(tmp_path, monkeypatch) -> None:
+    config = AppConfig(timezone="UTC", default_last_event_minutes=0, caldav_deletion_mode="cancel")
+    idx_path = tmp_path / "sync-index.json"
+    setup_transport = FakeTransport()
+    dry_transport = FakeTransport()
+    state = {"present": True}
+
+    def list_meta(_config: AppConfig):
+        if state["present"]:
+            return [{"id": 10, "date": "2026-04-01 00:00:00", "modified_gmt": "2026-04-01 10:00:00"}]
+        return []
+
+    def fetch(_config: AppConfig, _post_id: int):
+        return PostData(
+            post_id=10,
+            title="day",
+            post_date="2026-04-01 00:00:00",
+            post_content=_post_content("07:45 Breakfast", "08:30 Work"),
+            status="publish",
+        )
+
+    monkeypatch.setattr("wp_log_parser.sync.caldav_sync._list_post_metadata", list_meta)
+    monkeypatch.setattr("wp_log_parser.sync.caldav_sync.fetch_post", fetch)
+
+    sync_caldav_once(config, index_path=idx_path, uid_domain="example.com", transport=setup_transport)
+    before = idx_path.read_text(encoding="utf-8")
+
+    state["present"] = False
+    result = sync_caldav_once(config, index_path=idx_path, uid_domain="example.com", transport=dry_transport, dry_run=True)
+    assert result["cancelled"] == 2
+    assert result["deleted"] == 0
+    assert dry_transport.puts == []
+    assert dry_transport.deletes == []
+    assert idx_path.read_text(encoding="utf-8") == before
+
+
+def test_sync_index_load_supports_v1_payload_and_upgrades_on_save(tmp_path) -> None:
+    idx_path = tmp_path / "sync-index.json"
+    idx_path.write_text(
+        """
+{
+  "version": 1,
+  "updated_at": "2026-04-01T00:00:00+00:00",
+  "posts": {
+    "10": {
+      "modified_gmt": "2026-04-01 10:00:00",
+      "content_hash": "abc",
+      "event_uids": ["legacy-uid@example.com"]
+    }
+  },
+  "events": {
+    "legacy-uid@example.com": {
+      "post_id": 10,
+      "hash": "legacy-hash"
+    }
+  }
+}
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    index = SyncIndex.load(idx_path)
+    event = index.events["legacy-uid@example.com"]
+    assert event.uid == "legacy-uid@example.com"
+    assert event.status == "confirmed"
+    assert event.sequence == 0
+    assert event.resource_path == "legacy-uid@example.com.ics"
+    assert event.start_utc == ""
+    assert event.end_utc is None
+    assert event.summary == ""
+    assert index.posts["10"].cancelled_uids == []
+
+    index.save(idx_path)
+    payload = idx_path.read_text(encoding="utf-8")
+    assert '"version": 2' in payload

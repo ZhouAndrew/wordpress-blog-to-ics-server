@@ -60,20 +60,31 @@ class SyncIndex:
             )
             for post_id, data in payload.get("posts", {}).items()
         }
-        events = {
-            str(uid): EventSyncState(
-                uid=str(data.get("uid", uid)),
-                post_id=int(data["post_id"]),
-                resource_path=str(data.get("resource_path", _vevent_resource(str(uid)))),
+        events = {}
+        for uid, data in payload.get("events", {}).items():
+            event_uid = str(uid)
+            post_id_raw = data.get("post_id", 0)
+            try:
+                post_id = int(post_id_raw)
+            except (TypeError, ValueError):
+                post_id = 0
+            sequence_raw = data.get("sequence", 0)
+            try:
+                sequence = int(sequence_raw)
+            except (TypeError, ValueError):
+                sequence = 0
+
+            events[event_uid] = EventSyncState(
+                uid=str(data.get("uid", event_uid)),
+                post_id=post_id,
+                resource_path=str(data.get("resource_path", _vevent_resource(event_uid))),
                 start_utc=str(data.get("start_utc", "")),
                 end_utc=str(data["end_utc"]) if data.get("end_utc") is not None else None,
                 summary=str(data.get("summary", "")),
-                hash=str(data["hash"]),
-                sequence=int(data.get("sequence", 0)),
+                hash=str(data.get("hash", "")),
+                sequence=sequence,
                 status=str(data.get("status", "confirmed") or "confirmed"),
             )
-            for uid, data in payload.get("events", {}).items()
-        }
         return cls(posts=posts, events=events)
 
     def save(self, path: str | Path) -> None:
