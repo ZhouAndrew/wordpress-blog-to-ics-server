@@ -34,6 +34,7 @@ class AppConfig:
     caldav_password: str = ""
     caldav_uid_domain: str = "wordpress-blog-to-ics"
     caldav_index_path: str = "./output/caldav_sync_index.json"
+    caldav_deletion_mode: str = "delete"
 
 
 def create_default_config() -> AppConfig:
@@ -78,10 +79,19 @@ def load_config(path: str) -> AppConfig:
     except (TypeError, ValueError) as exc:
         raise ConfigError("post_selection_count must be an integer") from exc
 
-    for field_name in ["caldav_url", "caldav_username", "caldav_password", "caldav_uid_domain", "caldav_index_path"]:
+    for field_name in [
+        "caldav_url",
+        "caldav_username",
+        "caldav_password",
+        "caldav_uid_domain",
+        "caldav_index_path",
+        "caldav_deletion_mode",
+    ]:
         value = data.get(field_name, "")
         if not isinstance(value, str):
             raise ConfigError(f"{field_name} must be a string")
+    if data["caldav_deletion_mode"] not in {"delete", "cancel"}:
+        raise ConfigError("caldav_deletion_mode must be 'delete' or 'cancel'")
 
     patterns = data.get("custom_parsing_patterns", [])
     if patterns is None:
