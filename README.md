@@ -112,6 +112,7 @@ You can also start from `example.config.json`.
 - `caldav_username`, `caldav_password`: CalDAV credentials
 - `caldav_uid_domain`: UID suffix domain for event resources
 - `caldav_index_path`: local sync index JSON file path
+- `caldav_deletion_mode`: deletion strategy for removed events (`delete` default, or `cancel`)
 
 ---
 
@@ -195,6 +196,12 @@ UID behavior in v1:
 - If an entry start time changes, identity changes too, so sync performs **delete + create** (not in-place move/update).
 - This behavior is expected/accepted for v1.
 
+Deletion behavior:
+
+- `caldav_deletion_mode: "delete"` (default): removed events are removed with CalDAV `DELETE`.
+- `caldav_deletion_mode: "cancel"`: removed events are tombstoned using a `PUT` with `STATUS:CANCELLED` and incremented `SEQUENCE`.
+- In `cancel` mode, tombstones stay in the sync index for idempotency and compatibility with stricter clients/servers.
+
 ---
 
 ## Command Reference
@@ -211,7 +218,7 @@ UID behavior in v1:
 - `run-ics-service` – periodic publish + static HTTP server
 - `sync-caldav` – incremental event-level CalDAV synchronization
 
-> Note: removed events currently use CalDAV `DELETE` (not `STATUS:CANCELLED`). For stricter clients/servers, future tombstone/CANCELLED handling may be needed.
+> Note: if you choose `caldav_deletion_mode: "cancel"`, removed entries are kept as CANCELLED tombstones in the sync index. Tombstone cleanup is not implemented yet.
 
 ---
 

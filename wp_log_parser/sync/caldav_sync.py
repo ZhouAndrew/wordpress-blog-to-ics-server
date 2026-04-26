@@ -1,12 +1,6 @@
 from __future__ import annotations
 
-"""
-Incremental CalDAV sync engine.
-
-Current deletion strategy issues CalDAV DELETE for removed events.
-Some stricter clients/servers may eventually require tombstone/CANCELLED behavior
-instead of hard deletes; keep this in mind for a future compatibility pass.
-"""
+"""Incremental CalDAV sync engine."""
 
 import hashlib
 import json
@@ -29,12 +23,20 @@ class PostSyncState:
     modified_gmt: str
     content_hash: str
     event_uids: list[str]
+    cancelled_uids: list[str] = field(default_factory=list)
 
 
 @dataclass
 class EventSyncState:
+    uid: str
     post_id: int
+    resource_path: str
+    start_utc: str
+    end_utc: str | None
+    summary: str
     hash: str
+    sequence: int = 0
+    status: str = "confirmed"
 
 
 @dataclass
@@ -54,11 +56,22 @@ class SyncIndex:
                 modified_gmt=str(data.get("modified_gmt", "")),
                 content_hash=str(data.get("content_hash", "")),
                 event_uids=[str(uid) for uid in data.get("event_uids", [])],
+                cancelled_uids=[str(uid) for uid in data.get("cancelled_uids", [])],
             )
             for post_id, data in payload.get("posts", {}).items()
         }
         events = {
-            str(uid): EventSyncState(post_id=int(data["post_id"]), hash=str(data["hash"]))
+            str(uid): EventSyncState(
+                uid=str(data.get("uid", uid)),
+                post_id=int(data["post_id"]),
+                resource_path=str(data.get("resource_path", _vevent_resource(str(uid)))),
+                start_utc=str(data.get("start_utc", "")),
+                end_utc=str(data["end_utc"]) if data.get("end_utc") is not None else None,
+                summary=str(data.get("summary", "")),
+                hash=str(data["hash"]),
+                sequence=int(data.get("sequence", 0)),
+                status=str(data.get("status", "confirmed") or "confirmed"),
+            )
             for uid, data in payload.get("events", {}).items()
         }
         return cls(posts=posts, events=events)
@@ -67,18 +80,29 @@ class SyncIndex:
         idx_path = Path(path)
         idx_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
-            "version": 1,
+            "version": 2,
             "updated_at": datetime.now(timezone.utc).isoformat(),
             "posts": {
                 post_id: {
                     "modified_gmt": state.modified_gmt,
                     "content_hash": state.content_hash,
                     "event_uids": state.event_uids,
+                    "cancelled_uids": state.cancelled_uids,
                 }
                 for post_id, state in self.posts.items()
             },
             "events": {
-                uid: {"post_id": state.post_id, "hash": state.hash}
+                uid: {
+                    "uid": state.uid,
+                    "post_id": state.post_id,
+                    "resource_path": state.resource_path,
+                    "start_utc": state.start_utc,
+                    "end_utc": state.end_utc,
+                    "summary": state.summary,
+                    "hash": state.hash,
+                    "sequence": state.sequence,
+                    "status": state.status,
+                }
                 for uid, state in self.events.items()
             },
         }
@@ -148,6 +172,8 @@ class SyncOperationSummary:
     created: int = 0
     updated: int = 0
     deleted: int = 0
+    cancelled: int = 0
+    skipped: int = 0
     changed_posts: int = 0
 
 
@@ -155,9 +181,11 @@ class SyncOperationSummary:
 class _RenderedEvent:
     uid: str
     post_id: int
+    summary: str
+    start_utc: datetime
+    end_utc: datetime | None
     hash: str
     resource_path: str
-    ics_payload: str
 
 
 def _canonical_content_hash(content: str) -> str:
@@ -175,6 +203,20 @@ def _event_hash(summary: str, start_utc: datetime, end_utc: datetime | None) -> 
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
+def _cancelled_event_hash(uid: str, sequence: int, start_utc: datetime, end_utc: datetime | None, summary: str) -> str:
+    material = "|".join(
+        [
+            "cancelled",
+            uid,
+            str(sequence),
+            start_utc.isoformat(),
+            end_utc.isoformat() if end_utc else "",
+            summary,
+        ]
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
 def _vevent_resource(uid: str) -> str:
     return f"{quote(uid, safe='@-_.')}.ics"
 
@@ -184,7 +226,15 @@ def _to_utc(naive_dt: datetime, tz_name: str) -> datetime:
     return naive_dt.replace(tzinfo=local_tz).astimezone(timezone.utc)
 
 
-def _single_event_ics(uid: str, summary: str, start_utc: datetime, end_utc: datetime | None) -> str:
+def _single_event_ics(
+    uid: str,
+    summary: str,
+    start_utc: datetime,
+    end_utc: datetime | None,
+    *,
+    sequence: int,
+    status: str = "CONFIRMED",
+) -> str:
     dtstamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     lines = [
         "BEGIN:VCALENDAR",
@@ -194,6 +244,8 @@ def _single_event_ics(uid: str, summary: str, start_utc: datetime, end_utc: date
         "BEGIN:VEVENT",
         f"UID:{uid}",
         f"DTSTAMP:{dtstamp}",
+        f"SEQUENCE:{sequence}",
+        f"STATUS:{status}",
         f"DTSTART:{start_utc.strftime('%Y%m%dT%H%M%SZ')}",
         "X-WP-LOG-PARSER-MANAGED:TRUE",
     ]
@@ -282,12 +334,72 @@ def _render_post_events(post_id: int, post_date: str, post_content: str, config:
             _RenderedEvent(
                 uid=uid,
                 post_id=post_id,
+                summary=entry.summary,
+                start_utc=start_utc,
+                end_utc=end_utc,
                 hash=digest,
                 resource_path=_vevent_resource(uid),
-                ics_payload=_single_event_ics(uid, entry.summary, start_utc, end_utc),
             )
         )
     return events
+
+
+def _parse_index_dt(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    dt = datetime.fromisoformat(value)
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _cancel_uid(
+    *,
+    uid: str,
+    old_event: EventSyncState | None,
+    fallback_post_id: int,
+    transport: CalDAVTransport,
+    dry_run: bool,
+    index: SyncIndex,
+    summary: SyncOperationSummary,
+) -> bool:
+    if old_event is not None and old_event.status == "cancelled":
+        return True
+
+    fallback_start = _parse_index_dt(old_event.start_utc if old_event is not None else None)
+    if fallback_start is None:
+        summary.skipped += 1
+        return False
+
+    fallback_end = _parse_index_dt(old_event.end_utc if old_event is not None else None)
+    cancelled_sequence = (old_event.sequence if old_event is not None else 0) + 1
+    cancelled_summary = old_event.summary if old_event is not None else ""
+    resource_path = old_event.resource_path if old_event is not None else _vevent_resource(uid)
+    cancelled_payload = _single_event_ics(
+        uid=uid,
+        summary=cancelled_summary,
+        start_utc=fallback_start,
+        end_utc=fallback_end,
+        sequence=cancelled_sequence,
+        status="CANCELLED",
+    )
+
+    if not dry_run:
+        transport.put(resource_path, cancelled_payload)
+        index.events[uid] = EventSyncState(
+            uid=uid,
+            post_id=old_event.post_id if old_event is not None else fallback_post_id,
+            resource_path=resource_path,
+            start_utc=fallback_start.isoformat(),
+            end_utc=fallback_end.isoformat() if fallback_end else None,
+            summary=cancelled_summary,
+            hash=_cancelled_event_hash(uid, cancelled_sequence, fallback_start, fallback_end, cancelled_summary),
+            sequence=cancelled_sequence,
+            status="cancelled",
+        )
+
+    summary.cancelled += 1
+    return True
 
 
 def sync_caldav_once(
@@ -300,6 +412,7 @@ def sync_caldav_once(
 ) -> dict[str, Any]:
     index = SyncIndex.load(index_path)
     summary = SyncOperationSummary()
+    deletion_mode = config.caldav_deletion_mode
 
     posts = _list_post_metadata(config)
     post_map = {int(item["id"]): item for item in posts}
@@ -320,53 +433,141 @@ def sync_caldav_once(
                     modified_gmt=modified_gmt,
                     content_hash=content_hash,
                     event_uids=prev.event_uids,
+                    cancelled_uids=prev.cancelled_uids,
                 )
             continue
 
         summary.changed_posts += 1
         rendered_events = _render_post_events(post_id, post.post_date, post.post_content, config, uid_domain)
         new_by_uid = {event.uid: event for event in rendered_events}
-        old_uids = set(prev.event_uids if prev else [])
+        old_active_uids = set(prev.event_uids if prev else [])
+        old_cancelled_uids = set(prev.cancelled_uids if prev else [])
+        old_uids = old_active_uids | old_cancelled_uids
         new_uids = set(new_by_uid)
+        next_cancelled_uids = set(old_cancelled_uids)
 
         for uid in sorted(new_uids - old_uids):
             event = new_by_uid[uid]
-            transport.put(event.resource_path, event.ics_payload)
+            payload = _single_event_ics(
+                event.uid,
+                event.summary,
+                event.start_utc,
+                event.end_utc,
+                sequence=0,
+                status="CONFIRMED",
+            )
             if not dry_run:
-                index.events[uid] = EventSyncState(post_id=post_id, hash=event.hash)
+                transport.put(event.resource_path, payload)
+            if not dry_run:
+                index.events[uid] = EventSyncState(
+                    uid=event.uid,
+                    post_id=post_id,
+                    resource_path=event.resource_path,
+                    start_utc=event.start_utc.isoformat(),
+                    end_utc=event.end_utc.isoformat() if event.end_utc else None,
+                    summary=event.summary,
+                    hash=event.hash,
+                    sequence=0,
+                    status="confirmed",
+                )
+            next_cancelled_uids.discard(uid)
             summary.created += 1
 
         for uid in sorted(new_uids & old_uids):
             event = new_by_uid[uid]
             old_event = index.events.get(uid)
-            if old_event is None or old_event.hash != event.hash:
-                transport.put(event.resource_path, event.ics_payload)
+            current_sequence = 0
+            if old_event is not None:
+                current_sequence = old_event.sequence
+            if old_event is not None and (old_event.hash != event.hash or old_event.status != "confirmed"):
+                current_sequence += 1
+                payload = _single_event_ics(
+                    event.uid,
+                    event.summary,
+                    event.start_utc,
+                    event.end_utc,
+                    sequence=current_sequence,
+                    status="CONFIRMED",
+                )
+                if not dry_run:
+                    transport.put(event.resource_path, payload)
+                summary.updated += 1
+            elif old_event is None:
+                payload = _single_event_ics(
+                    event.uid,
+                    event.summary,
+                    event.start_utc,
+                    event.end_utc,
+                    sequence=current_sequence,
+                    status="CONFIRMED",
+                )
+                if not dry_run:
+                    transport.put(event.resource_path, payload)
                 summary.updated += 1
             if not dry_run:
-                index.events[uid] = EventSyncState(post_id=post_id, hash=event.hash)
+                index.events[uid] = EventSyncState(
+                    uid=event.uid,
+                    post_id=post_id,
+                    resource_path=event.resource_path,
+                    start_utc=event.start_utc.isoformat(),
+                    end_utc=event.end_utc.isoformat() if event.end_utc else None,
+                    summary=event.summary,
+                    hash=event.hash,
+                    sequence=current_sequence,
+                    status="confirmed",
+                )
+            next_cancelled_uids.discard(uid)
 
         for uid in sorted(old_uids - new_uids):
-            transport.delete(_vevent_resource(uid))
-            if not dry_run:
-                index.events.pop(uid, None)
-            summary.deleted += 1
+            old_event = index.events.get(uid)
+            if deletion_mode == "cancel":
+                if _cancel_uid(
+                    uid=uid,
+                    old_event=old_event,
+                    fallback_post_id=post_id,
+                    transport=transport,
+                    dry_run=dry_run,
+                    index=index,
+                    summary=summary,
+                ):
+                    next_cancelled_uids.add(uid)
+            else:
+                if not dry_run:
+                    transport.delete(_vevent_resource(uid))
+                    index.events.pop(uid, None)
+                summary.deleted += 1
+                next_cancelled_uids.discard(uid)
 
         if not dry_run:
             index.posts[post_id_key] = PostSyncState(
                 modified_gmt=modified_gmt,
                 content_hash=content_hash,
                 event_uids=[event.uid for event in rendered_events],
+                cancelled_uids=sorted(next_cancelled_uids),
             )
 
     # Remove state for posts no longer listed in source.
     stale_post_ids = set(index.posts) - {str(pid) for pid in post_map}
     for stale_post_id in sorted(stale_post_ids):
         stale_state = index.posts[stale_post_id]
-        for uid in stale_state.event_uids:
-            transport.delete(_vevent_resource(uid))
-            if not dry_run:
-                index.events.pop(uid, None)
-            summary.deleted += 1
+        stale_uids = list(stale_state.event_uids) + list(stale_state.cancelled_uids)
+        for uid in stale_uids:
+            old_event = index.events.get(uid)
+            if deletion_mode == "cancel":
+                _cancel_uid(
+                    uid=uid,
+                    old_event=old_event,
+                    fallback_post_id=int(stale_post_id),
+                    transport=transport,
+                    dry_run=dry_run,
+                    index=index,
+                    summary=summary,
+                )
+            else:
+                if not dry_run:
+                    transport.delete(_vevent_resource(uid))
+                    index.events.pop(uid, None)
+                summary.deleted += 1
         if not dry_run:
             index.posts.pop(stale_post_id, None)
 
@@ -377,6 +578,8 @@ def sync_caldav_once(
         "created": summary.created,
         "updated": summary.updated,
         "deleted": summary.deleted,
+        "cancelled": summary.cancelled,
+        "skipped": summary.skipped,
         "changed_posts": summary.changed_posts,
         "dry_run": dry_run,
         "index_path": str(index_path),

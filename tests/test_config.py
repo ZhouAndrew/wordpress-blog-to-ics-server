@@ -26,3 +26,12 @@ def test_load_config_rejects_non_string_caldav_fields(tmp_path):
 
     with pytest.raises(ConfigError):
         load_config(str(path))
+
+
+def test_load_config_rejects_invalid_caldav_deletion_mode(tmp_path):
+    path = tmp_path / "config.json"
+    payload = {"caldav_deletion_mode": "hard-delete"}
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ConfigError):
+        load_config(str(path))
