@@ -200,7 +200,17 @@ Deletion behavior:
 
 - `caldav_deletion_mode: "delete"` (default): removed events are removed with CalDAV `DELETE`.
 - `caldav_deletion_mode: "cancel"`: removed events are tombstoned using a `PUT` with `STATUS:CANCELLED` and incremented `SEQUENCE`.
-- In `cancel` mode, tombstones stay in the sync index for idempotency and compatibility with stricter clients/servers.
+- In `cancel` mode, tombstones stay in `index.events` for idempotency and compatibility with stricter clients/servers.
+- Restoring a previously removed event in `cancel` mode reuses the same UID/resource path and sends `STATUS:CONFIRMED` with an incremented `SEQUENCE`.
+- Whole-post removal:
+  - In `delete` mode, previously tracked events are removed from CalDAV and then removed from the sync index.
+  - In `cancel` mode, previously tracked events are written once as `STATUS:CANCELLED` tombstones and retained in `index.events`.
+  - Post ownership state in `index.posts` is dropped when the post disappears from the source listing.
+  - Tombstone retention in `index.events` makes repeated runs idempotent even after post ownership is dropped.
+- Automatic tombstone cleanup is not implemented yet.
+- Recommended future cleanup policy:
+  - keep tombstones for a retention window (for example, 30 days), or
+  - add an explicit cleanup command so pruning is operator-controlled.
 
 ---
 
@@ -218,7 +228,7 @@ Deletion behavior:
 - `run-ics-service` – periodic publish + static HTTP server
 - `sync-caldav` – incremental event-level CalDAV synchronization
 
-> Note: if you choose `caldav_deletion_mode: "cancel"`, removed entries are kept as CANCELLED tombstones in the sync index. Tombstone cleanup is not implemented yet.
+> Note: if you choose `caldav_deletion_mode: "cancel"`, removed entries are kept as CANCELLED tombstones in `index.events` (while `index.posts` ownership for removed posts is dropped). Tombstone cleanup is not implemented yet.
 
 ---
 
