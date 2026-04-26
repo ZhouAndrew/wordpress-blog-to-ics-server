@@ -190,6 +190,15 @@ Dry-run (report changes without writing to CalDAV or the index file):
 python -m wp_log_parser sync-caldav --config ./config.json --dry-run
 ```
 
+Debug mode (extra diagnostics + sanitized run snapshot):
+
+```bash
+python -m wp_log_parser sync-caldav --config ./config.json --debug
+python -m wp_log_parser run-today --config ./config.json --debug
+python -m wp_log_parser post-to-ics --config ./config.json --post-id 10213 --debug
+python -m wp_log_parser publish-ics --config ./config.json --days 7 --debug
+```
+
 UID behavior in v1:
 
 - UIDs are stable across insertion of unrelated entries.
@@ -277,6 +286,25 @@ Depending on command and config, output can include:
 - Verify `output_dir` in `config.json`
 - Use verbose command variants where available
 - Check whether the selected post actually contains timed log entries
+
+## Debugging
+
+- Add `--debug` to these commands:
+  - `sync-caldav`
+  - `run-today`
+  - `post-to-ics`
+  - `publish-ics`
+- `--debug` prints a human-readable diagnostics header (selected config path, sanitized config summary, WordPress mode, timezone, output/error directories, deletion mode, dry-run state, operation counts, and index path when available).
+- A sanitized snapshot is always written to:
+  - `<error_dir>/last_run.json`
+- On failures, a timestamped copy is also written:
+  - `<error_dir>/debug_YYYYMMDDTHHMMSSZ.json`
+- Snapshot content includes:
+  - UTC timestamp, command, success/failure, dry-run, sanitized config, result summary, processed post IDs (when known), changed post count, CalDAV counts, index path, and sanitized error traceback on failures.
+- Redaction rules:
+  - Password/token-like fields (for example `app_password`, `caldav_password`) are redacted as `***` when non-empty and `\"\"` when empty.
+  - Raw post content and CalDAV ICS payload bodies are intentionally excluded.
+- When reporting bugs, share `errors/last_run.json` (or your configured `error_dir/last_run.json`).
 
 ---
 

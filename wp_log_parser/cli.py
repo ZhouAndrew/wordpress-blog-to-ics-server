@@ -3,10 +3,12 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import traceback
 from pathlib import Path
 
 from .aliases import find_today_ics_candidates, generate_today_ics, select_today_ics, today_date_str
 from .config import config_exists, create_default_config, load_config, save_config
+from .debug_report import sanitize_config, write_recent_run_snapshot
 from .fetcher import fetch_post, normalize_post_date
 from .ics import generate_ics
 from .ics_exporter import write_post_ics
@@ -103,16 +105,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_run = sub.add_parser("run-today")
     p_run.add_argument("--config", default="./config.json")
+    p_run.add_argument("--debug", action="store_true")
 
     p_post_to_ics = sub.add_parser("post-to-ics")
     p_post_to_ics.add_argument("--config", default="./config.json")
     p_post_to_ics.add_argument("--post-id", type=int, required=True)
     p_post_to_ics.add_argument("--verbose", action="store_true")
+    p_post_to_ics.add_argument("--debug", action="store_true")
 
     p_publish_ics = sub.add_parser("publish-ics")
     p_publish_ics.add_argument("--config", default="./config.json")
     p_publish_ics.add_argument("--days", type=int, required=True)
     p_publish_ics.add_argument("--verbose", action="store_true")
+    p_publish_ics.add_argument("--debug", action="store_true")
 
     p_update_today = sub.add_parser("update-today-ics")
     p_update_today.add_argument("--config", default="./config.json")
@@ -131,8 +136,35 @@ def build_parser() -> argparse.ArgumentParser:
     p_sync_caldav = sub.add_parser("sync-caldav")
     p_sync_caldav.add_argument("--config", default="./config.json")
     p_sync_caldav.add_argument("--dry-run", action="store_true")
+    p_sync_caldav.add_argument("--debug", action="store_true")
 
     return parser
+
+
+def _print_debug_header(command: str, config_path: str, config, extras: dict[str, object] | None = None) -> None:
+    print(f"[DEBUG] command: {command}")
+    print(f"[DEBUG] config_path: {config_path}")
+    print(f"[DEBUG] config_summary: {json.dumps(sanitize_config(config), ensure_ascii=False, sort_keys=True)}")
+    print(f"[DEBUG] wordpress_mode: {config.wordpress_mode}")
+    print(f"[DEBUG] timezone: {config.timezone}")
+    print(f"[DEBUG] output_dir: {config.output_dir}")
+    print(f"[DEBUG] error_dir: {config.error_dir}")
+    print(f"[DEBUG] caldav_deletion_mode: {config.caldav_deletion_mode}")
+    if extras:
+        for key, value in extras.items():
+            print(f"[DEBUG] {key}: {value}")
+
+
+def _debug_enabled(args: argparse.Namespace) -> bool:
+    return bool(getattr(args, "debug", False))
+
+
+def _write_snapshot_best_effort(**kwargs):
+    try:
+        return write_recent_run_snapshot(**kwargs)
+    except Exception as exc:
+        print(f"[WARN] Failed to write run snapshot: {exc}")
+        return None, None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -228,39 +260,147 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "run-today":
-        print(json.dumps(run_today_pipeline(config), ensure_ascii=False, indent=2))
-        return 0
+        if _debug_enabled(args):
+            _print_debug_header(args.command, args.config, config)
+        try:
+            result = run_today_pipeline(config)
+            _write_snapshot_best_effort(
+                error_dir=config.error_dir,
+                command=args.command,
+                success=True,
+                config=config,
+                summary=result,
+                processed_post_ids=[int(result["post_id"])] if result.get("post_id") is not None else None,
+            )
+            if _debug_enabled(args):
+                print(f"[DEBUG] processed_post_ids: {result.get('post_id')}")
+                print(f"[DEBUG] event_count: {len(result.get('entries', []))}")
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        except Exception as exc:
+            if _debug_enabled(args):
+                print("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
+            try:
+                last_run_path, timestamped_path = write_recent_run_snapshot(
+                    error_dir=config.error_dir,
+                    command=args.command,
+                    success=False,
+                    config=config,
+                    error=exc,
+                )
+                print(f"Debug report written to: {last_run_path}")
+                if timestamped_path is not None:
+                    print(f"Debug report written to: {timestamped_path}")
+            except Exception as snapshot_exc:
+                print(f"[WARN] Failed to write debug report: {snapshot_exc}")
+            print(f"[ERROR] {exc}")
+            return 1
 
     if args.command == "post-to-ics":
-        post = fetch_post(config, args.post_id)
-        post_date = normalize_post_date(post.post_date)
-        parsed = parse_post_content(post.post_content, post_date, config, verbose=args.verbose)
-        if not parsed.entries:
-            print("No valid timed log entries found in post.")
-            return 1
-        out_path = write_post_ics(post, parsed.entries, config.output_dir, config.timezone)
-        if args.verbose:
-            print(f"[OK] Wrote ICS file: {out_path}")
-        print(
-            json.dumps(
-                {
-                    "post_id": post.post_id,
-                    "title": post.title,
-                    "post_date": post.post_date,
-                    "output_file": str(out_path),
-                    "entry_count": len(parsed.entries),
-                    "ignored_block_count": len(parsed.ignored_blocks),
-                },
-                ensure_ascii=False,
-                indent=2,
+        if _debug_enabled(args):
+            _print_debug_header(args.command, args.config, config, {"post_ids": [args.post_id]})
+        try:
+            post = fetch_post(config, args.post_id)
+            post_date = normalize_post_date(post.post_date)
+            parsed = parse_post_content(post.post_content, post_date, config, verbose=args.verbose)
+            if not parsed.entries:
+                print("No valid timed log entries found in post.")
+                last_run_path, timestamped_path = write_recent_run_snapshot(
+                    error_dir=config.error_dir,
+                    command=args.command,
+                    success=False,
+                    config=config,
+                    summary={"post_id": post.post_id, "entry_count": 0},
+                    processed_post_ids=[post.post_id],
+                    error=RuntimeError("No valid timed log entries found in post."),
+                )
+                print(f"Debug report written to: {last_run_path}")
+                if timestamped_path is not None:
+                    print(f"Debug report written to: {timestamped_path}")
+                return 1
+            out_path = write_post_ics(post, parsed.entries, config.output_dir, config.timezone)
+            result = {
+                "post_id": post.post_id,
+                "title": post.title,
+                "post_date": post.post_date,
+                "output_file": str(out_path),
+                "entry_count": len(parsed.entries),
+                "ignored_block_count": len(parsed.ignored_blocks),
+            }
+            _write_snapshot_best_effort(
+                error_dir=config.error_dir,
+                command=args.command,
+                success=True,
+                config=config,
+                summary=result,
+                processed_post_ids=[post.post_id],
             )
-        )
-        return 0
+            if _debug_enabled(args):
+                print(f"[DEBUG] processed_post_ids: {[post.post_id]}")
+                print(f"[DEBUG] event_count: {len(parsed.entries)}")
+            if args.verbose:
+                print(f"[OK] Wrote ICS file: {out_path}")
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        except Exception as exc:
+            if _debug_enabled(args):
+                print("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
+            try:
+                last_run_path, timestamped_path = write_recent_run_snapshot(
+                    error_dir=config.error_dir,
+                    command=args.command,
+                    success=False,
+                    config=config,
+                    processed_post_ids=[args.post_id],
+                    error=exc,
+                )
+                print(f"Debug report written to: {last_run_path}")
+                if timestamped_path is not None:
+                    print(f"Debug report written to: {timestamped_path}")
+            except Exception as snapshot_exc:
+                print(f"[WARN] Failed to write debug report: {snapshot_exc}")
+            print(f"[ERROR] {exc}")
+            return 1
 
     if args.command == "publish-ics":
-        result = publish_once(config, days=args.days, verbose=args.verbose)
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-        return 0
+        if _debug_enabled(args):
+            _print_debug_header(args.command, args.config, config, {"days": args.days})
+        try:
+            result = publish_once(config, days=args.days, verbose=args.verbose)
+            post_ids = [int(item["post_id"]) for item in result.get("items", []) if item.get("post_id") is not None]
+            _write_snapshot_best_effort(
+                error_dir=config.error_dir,
+                command=args.command,
+                success=True,
+                config=config,
+                summary=result,
+                processed_post_ids=post_ids,
+                index_path=result.get("index_json"),
+            )
+            if _debug_enabled(args):
+                print(f"[DEBUG] processed_post_ids: {post_ids}")
+                print(f"[DEBUG] event_operation_counts: published={result.get('published_count', 0)}")
+                print(f"[DEBUG] index_path: {result.get('index_json')}")
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        except Exception as exc:
+            if _debug_enabled(args):
+                print("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
+            try:
+                last_run_path, timestamped_path = write_recent_run_snapshot(
+                    error_dir=config.error_dir,
+                    command=args.command,
+                    success=False,
+                    config=config,
+                    error=exc,
+                )
+                print(f"Debug report written to: {last_run_path}")
+                if timestamped_path is not None:
+                    print(f"Debug report written to: {timestamped_path}")
+            except Exception as snapshot_exc:
+                print(f"[WARN] Failed to write debug report: {snapshot_exc}")
+            print(f"[ERROR] {exc}")
+            return 1
 
     if args.command == "update-today-ics":
         try:
@@ -305,8 +445,56 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "sync-caldav":
-        result = run_caldav_sync(config, dry_run=args.dry_run)
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-        return 0
+        debug_events = [] if _debug_enabled(args) else None
+        if _debug_enabled(args):
+            _print_debug_header(args.command, args.config, config, {"dry_run": args.dry_run})
+        try:
+            result = run_caldav_sync(config, dry_run=args.dry_run, debug_events=debug_events)
+            caldav_counts = {
+                "created": int(result.get("created", 0)),
+                "updated": int(result.get("updated", 0)),
+                "deleted": int(result.get("deleted", 0)),
+                "cancelled": int(result.get("cancelled", 0)),
+                "skipped": int(result.get("skipped", 0)),
+            }
+            _write_snapshot_best_effort(
+                error_dir=config.error_dir,
+                command=args.command,
+                success=True,
+                config=config,
+                dry_run=args.dry_run,
+                summary=result,
+                changed_post_count=result.get("changed_posts"),
+                caldav_counts=caldav_counts,
+                index_path=result.get("index_path"),
+                debug_operations=debug_events,
+            )
+            if _debug_enabled(args):
+                print(f"[DEBUG] dry_run: {args.dry_run}")
+                print(f"[DEBUG] event_operation_counts: {caldav_counts}")
+                print(f"[DEBUG] changed_post_count: {result.get('changed_posts')}")
+                print(f"[DEBUG] index_path: {result.get('index_path')}")
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        except Exception as exc:
+            if _debug_enabled(args):
+                print("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
+            try:
+                last_run_path, timestamped_path = write_recent_run_snapshot(
+                    error_dir=config.error_dir,
+                    command=args.command,
+                    success=False,
+                    config=config,
+                    dry_run=args.dry_run,
+                    debug_operations=debug_events,
+                    error=exc,
+                )
+                print(f"Debug report written to: {last_run_path}")
+                if timestamped_path is not None:
+                    print(f"Debug report written to: {timestamped_path}")
+            except Exception as snapshot_exc:
+                print(f"[WARN] Failed to write debug report: {snapshot_exc}")
+            print(f"[ERROR] {exc}")
+            return 1
 
     return 0
