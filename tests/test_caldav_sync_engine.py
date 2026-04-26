@@ -436,6 +436,60 @@ def test_cancel_mode_missing_index_fields_is_counted_as_skipped(tmp_path, monkey
     assert transport.puts == ["wp-10-20260401T074500Z-1@example.com.ics"]
 
 
+def test_debug_events_capture_create_cancel_restore_and_skip(tmp_path, monkeypatch) -> None:
+    config = AppConfig(timezone="UTC", default_last_event_minutes=0, caldav_deletion_mode="cancel")
+    transport = FakeTransport()
+    idx_path = tmp_path / "sync-index.json"
+    debug_events: list[dict[str, object]] = []
+    state = {"modified": "2026-04-01 10:00:00", "content": _post_content("07:45 Breakfast", "08:30 Work")}
+
+    def list_meta(_config: AppConfig):
+        return [{"id": 10, "date": "2026-04-01 00:00:00", "modified_gmt": state["modified"]}]
+
+    def fetch(_config: AppConfig, _post_id: int):
+        return PostData(
+            post_id=10,
+            title="day",
+            post_date="2026-04-01 00:00:00",
+            post_content=state["content"],
+            status="publish",
+        )
+
+    monkeypatch.setattr("wp_log_parser.sync.caldav_sync._list_post_metadata", list_meta)
+    monkeypatch.setattr("wp_log_parser.sync.caldav_sync.fetch_post", fetch)
+
+    sync_caldav_once(config, index_path=idx_path, uid_domain="example.com", transport=transport, debug_events=debug_events)
+    state["modified"] = "2026-04-02 10:00:00"
+    state["content"] = _post_content("07:45 Breakfast")
+    sync_caldav_once(config, index_path=idx_path, uid_domain="example.com", transport=transport, debug_events=debug_events)
+    state["modified"] = "2026-04-03 10:00:00"
+    state["content"] = _post_content("07:45 Breakfast", "08:30 Work")
+    sync_caldav_once(config, index_path=idx_path, uid_domain="example.com", transport=transport, debug_events=debug_events)
+
+    # Skip case from malformed index tombstone.
+    idx_path.write_text(
+        """
+{
+  "version": 2,
+  "updated_at": "2026-04-01T00:00:00+00:00",
+  "posts": {"10": {"modified_gmt": "2026-04-03 10:00:00", "content_hash": "x", "event_uids": ["wp-10-20260401T083000Z-1@example.com"], "cancelled_uids": []}},
+  "events": {"wp-10-20260401T083000Z-1@example.com": {"uid": "wp-10-20260401T083000Z-1@example.com", "post_id": 10, "resource_path": "wp-10-20260401T083000Z-1@example.com.ics", "start_utc": "", "end_utc": null, "summary": "Work", "hash": "x", "sequence": 1, "status": "confirmed"}}
+}
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    state["modified"] = "2026-04-04 10:00:00"
+    state["content"] = _post_content("07:45 Breakfast")
+    sync_caldav_once(config, index_path=idx_path, uid_domain="example.com", transport=transport, debug_events=debug_events)
+
+    operations = {item["operation"] for item in debug_events}
+    assert "create" in operations
+    assert "cancel" in operations
+    assert "restore" in operations
+    assert "skip" in operations
+
+
 def test_changed_event_increments_sequence_and_active_event_has_sequence(tmp_path, monkeypatch) -> None:
     config = AppConfig(timezone="UTC", default_last_event_minutes=0)
     transport = FakeTransport()

@@ -6,9 +6,10 @@ from wp_log_parser.config import AppConfig
 
 def test_cli_parser_includes_sync_caldav_command() -> None:
     parser = cli.build_parser()
-    args = parser.parse_args(["sync-caldav", "--config", "./config.json", "--dry-run"])
+    args = parser.parse_args(["sync-caldav", "--config", "./config.json", "--dry-run", "--debug"])
     assert args.command == "sync-caldav"
     assert args.dry_run is True
+    assert args.debug is True
 
 
 def test_cli_sync_caldav_executes_engine(monkeypatch, capsys) -> None:
@@ -18,10 +19,12 @@ def test_cli_sync_caldav_executes_engine(monkeypatch, capsys) -> None:
     monkeypatch.setattr(
         cli,
         "run_caldav_sync",
-        lambda config, dry_run=False: {
+        lambda config, dry_run=False, debug_events=None: {
             "created": 0,
             "updated": 0,
             "deleted": 0,
+            "cancelled": 0,
+            "skipped": 0,
             "changed_posts": 0,
             "dry_run": dry_run,
             "index_path": config.caldav_index_path,

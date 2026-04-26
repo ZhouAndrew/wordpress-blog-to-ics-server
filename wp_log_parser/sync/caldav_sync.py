@@ -373,6 +373,8 @@ def _cancel_uid(
     dry_run: bool,
     index: SyncIndex,
     summary: SyncOperationSummary,
+    reason: str,
+    debug_events: list[dict[str, Any]] | None = None,
 ) -> bool:
     if old_event is not None and old_event.status == "cancelled":
         return True
@@ -380,6 +382,18 @@ def _cancel_uid(
     fallback_start = _parse_index_dt(old_event.start_utc if old_event is not None else None)
     if fallback_start is None:
         summary.skipped += 1
+        if debug_events is not None:
+            debug_events.append({
+                "operation": "skip",
+                "post_id": old_event.post_id if old_event is not None else fallback_post_id,
+                "uid": uid,
+                "resource_path": old_event.resource_path if old_event is not None else _vevent_resource(uid),
+                "status_before": old_event.status if old_event is not None else None,
+                "status_after": old_event.status if old_event is not None else None,
+                "sequence_before": old_event.sequence if old_event is not None else None,
+                "sequence_after": old_event.sequence if old_event is not None else None,
+                "reason": "missing start_utc",
+            })
         return False
 
     fallback_end = _parse_index_dt(old_event.end_utc if old_event is not None else None)
@@ -410,6 +424,18 @@ def _cancel_uid(
         )
 
     summary.cancelled += 1
+    if debug_events is not None:
+        debug_events.append({
+            "operation": "cancel",
+            "post_id": old_event.post_id if old_event is not None else fallback_post_id,
+            "uid": uid,
+            "resource_path": resource_path,
+            "status_before": old_event.status if old_event is not None else "confirmed",
+            "status_after": "cancelled",
+            "sequence_before": old_event.sequence if old_event is not None else 0,
+            "sequence_after": cancelled_sequence,
+            "reason": reason,
+        })
     return True
 
 
@@ -420,6 +446,7 @@ def sync_caldav_once(
     uid_domain: str,
     transport: CalDAVTransport,
     dry_run: bool = False,
+    debug_events: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     index = SyncIndex.load(index_path)
     summary = SyncOperationSummary()
@@ -459,6 +486,7 @@ def sync_caldav_once(
 
         for uid in sorted(new_uids - old_uids):
             event = new_by_uid[uid]
+            prior_event = index.events.get(uid)
             payload = _single_event_ics(
                 event.uid,
                 event.summary,
@@ -483,6 +511,18 @@ def sync_caldav_once(
                 )
             next_cancelled_uids.discard(uid)
             summary.created += 1
+            if debug_events is not None:
+                debug_events.append({
+                    "operation": "create",
+                    "post_id": post_id,
+                    "uid": event.uid,
+                    "resource_path": event.resource_path,
+                    "status_before": prior_event.status if prior_event is not None else None,
+                    "status_after": "confirmed",
+                    "sequence_before": prior_event.sequence if prior_event is not None else None,
+                    "sequence_after": 0,
+                    "reason": "new event",
+                })
 
         for uid in sorted(new_uids & old_uids):
             event = new_by_uid[uid]
@@ -503,6 +543,18 @@ def sync_caldav_once(
                 if not dry_run:
                     transport.put(event.resource_path, payload)
                 summary.updated += 1
+                if debug_events is not None:
+                    debug_events.append({
+                        "operation": "restore" if old_event is not None and old_event.status == "cancelled" else "update",
+                        "post_id": post_id,
+                        "uid": event.uid,
+                        "resource_path": event.resource_path,
+                        "status_before": old_event.status if old_event is not None else None,
+                        "status_after": "confirmed",
+                        "sequence_before": (current_sequence - 1),
+                        "sequence_after": current_sequence,
+                        "reason": "restored tombstone" if old_event is not None and old_event.status == "cancelled" else "hash changed",
+                    })
             elif old_event is None:
                 payload = _single_event_ics(
                     event.uid,
@@ -515,6 +567,18 @@ def sync_caldav_once(
                 if not dry_run:
                     transport.put(event.resource_path, payload)
                 summary.updated += 1
+                if debug_events is not None:
+                    debug_events.append({
+                        "operation": "update",
+                        "post_id": post_id,
+                        "uid": event.uid,
+                        "resource_path": event.resource_path,
+                        "status_before": None,
+                        "status_after": "confirmed",
+                        "sequence_before": None,
+                        "sequence_after": current_sequence,
+                        "reason": "missing index state",
+                    })
             if not dry_run:
                 index.events[uid] = EventSyncState(
                     uid=event.uid,
@@ -540,6 +604,8 @@ def sync_caldav_once(
                     dry_run=dry_run,
                     index=index,
                     summary=summary,
+                    reason="removed from source",
+                    debug_events=debug_events,
                 ):
                     next_cancelled_uids.add(uid)
             else:
@@ -547,6 +613,18 @@ def sync_caldav_once(
                     transport.delete(_vevent_resource(uid))
                     index.events.pop(uid, None)
                 summary.deleted += 1
+                if debug_events is not None:
+                    debug_events.append({
+                        "operation": "delete",
+                        "post_id": post_id,
+                        "uid": uid,
+                        "resource_path": _vevent_resource(uid),
+                        "status_before": old_event.status if old_event is not None else None,
+                        "status_after": None,
+                        "sequence_before": old_event.sequence if old_event is not None else None,
+                        "sequence_after": None,
+                        "reason": "removed from source",
+                    })
                 next_cancelled_uids.discard(uid)
 
         if not dry_run:
@@ -573,12 +651,26 @@ def sync_caldav_once(
                     dry_run=dry_run,
                     index=index,
                     summary=summary,
+                    reason="post removed from source",
+                    debug_events=debug_events,
                 )
             else:
                 if not dry_run:
                     transport.delete(_vevent_resource(uid))
                     index.events.pop(uid, None)
                 summary.deleted += 1
+                if debug_events is not None:
+                    debug_events.append({
+                        "operation": "delete",
+                        "post_id": int(stale_post_id),
+                        "uid": uid,
+                        "resource_path": _vevent_resource(uid),
+                        "status_before": old_event.status if old_event is not None else None,
+                        "status_after": None,
+                        "sequence_before": old_event.sequence if old_event is not None else None,
+                        "sequence_after": None,
+                        "reason": "post removed from source",
+                    })
         if not dry_run:
             index.posts.pop(stale_post_id, None)
 
@@ -597,7 +689,11 @@ def sync_caldav_once(
     }
 
 
-def run_caldav_sync(config: AppConfig, dry_run: bool = False) -> dict[str, Any]:
+def run_caldav_sync(
+    config: AppConfig,
+    dry_run: bool = False,
+    debug_events: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     transport: CalDAVTransport
     if dry_run:
         transport = DryRunCalDAVTransport()
@@ -615,4 +711,5 @@ def run_caldav_sync(config: AppConfig, dry_run: bool = False) -> dict[str, Any]:
         uid_domain=config.caldav_uid_domain,
         transport=transport,
         dry_run=dry_run,
+        debug_events=debug_events,
     )
