@@ -60,6 +60,22 @@ Typical use cases:
 
 ---
 
+## Quick Start (End-user Workflow)
+
+```bash
+./install.sh
+./run.sh
+```
+
+Windows:
+
+```bat
+install.bat
+run.bat
+```
+
+Inside the interactive app (`python -m wp_log_parser app`) you can run checks, inspect config, and run a dry-run sync.
+
 ## Installation
 
 ```bash
@@ -189,6 +205,22 @@ Dry-run (report changes without writing to CalDAV or the index file):
 ```bash
 python -m wp_log_parser sync-caldav --config ./config.json --dry-run
 ```
+
+### 8) Config operations
+
+```bash
+python -m wp_log_parser config --config ./config.json get timezone
+python -m wp_log_parser config --config ./config.json set timezone Asia/Seoul
+python -m wp_log_parser config --config ./config.json edit
+```
+
+### 9) Doctor checks
+
+```bash
+python -m wp_log_parser doctor --config ./config.json
+```
+
+`doctor` currently validates environment and configuration checks (paths, dependencies, mode-specific settings, optional/required CalDAV settings). It does not run a full fetch/parse pipeline health simulation.
 
 Debug mode (extra diagnostics + sanitized run snapshot):
 

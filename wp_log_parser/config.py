@@ -16,6 +16,7 @@ class AppConfig:
     python_path: str = "python3"
     output_dir: str = "./output"
     error_dir: str = "./errors"
+    logs_dir: str = "./logs"
     log_format: str = "gutenberg_raw"
     base_url: str = ""
     username: str = ""
