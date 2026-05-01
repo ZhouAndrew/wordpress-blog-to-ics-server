@@ -19,6 +19,8 @@ from .service_mode import publish_once, run_service_loop
 from .setup_wizard import run_setup_wizard, select_post_id
 from .sync import run_caldav_sync
 from .timeline import apply_timeline
+from .operations import config_get, config_set, edit_config_file, write_runtime_log
+from .service import list_posts
 from .validators import (
     validate_caldav_config,
     validate_dependencies,
@@ -30,27 +32,29 @@ from .validators import (
 )
 
 
-def _print_validation(config, *, require_caldav: bool = False) -> bool:
+def _print_validation(config, *, require_caldav: bool = False, include_caldav: bool = True) -> bool:
     checks = []
     checks.extend(validate_dependencies())
     checks.append(validate_python_path(config.python_path))
     checks.append(validate_output_dir(config.output_dir))
     checks.append(validate_output_dir(config.error_dir))
+    checks.append(validate_output_dir(config.logs_dir))
     if config.wordpress_mode == "wpcli":
         checks.append(validate_wp_cli(config.wp_cli_path))
         checks.append(validate_wordpress_path(config.wp_path))
     else:
         checks.append(validate_rest_credentials(config.base_url, config.username, config.app_password, config.verify_ssl))
-    checks.append(
-        validate_caldav_config(
-            config.caldav_url,
-            config.caldav_username,
-            config.caldav_password,
-            config.caldav_uid_domain,
-            config.caldav_index_path,
-            required=require_caldav,
+    if include_caldav:
+        checks.append(
+            validate_caldav_config(
+                config.caldav_url,
+                config.caldav_username,
+                config.caldav_password,
+                config.caldav_uid_domain,
+                config.caldav_index_path,
+                required=require_caldav,
+            )
         )
-    )
 
     ok = True
     for c in checks:
@@ -59,6 +63,34 @@ def _print_validation(config, *, require_caldav: bool = False) -> bool:
         if not c.ok:
             ok = False
     return ok
+
+
+def _doctor(config, *, require_caldav: bool = False) -> bool:
+    print("== Core checks ==")
+    core_ok = _print_validation(config, require_caldav=False, include_caldav=False)
+    if require_caldav:
+        print("== CalDAV checks (required) ==")
+        c = validate_caldav_config(
+            config.caldav_url,
+            config.caldav_username,
+            config.caldav_password,
+            config.caldav_uid_domain,
+            config.caldav_index_path,
+            required=True,
+        )
+        print(f"{'[OK]' if c.ok else '[ERROR]'} {c.name}: {c.message}")
+        return core_ok and c.ok
+    print("== CalDAV checks (optional) ==")
+    c = validate_caldav_config(
+        config.caldav_url,
+        config.caldav_username,
+        config.caldav_password,
+        config.caldav_uid_domain,
+        config.caldav_index_path,
+        required=False,
+    )
+    print(f"{'[OK]' if c.ok else '[WARN]'} {c.name}: {c.message}")
+    return core_ok
 
 
 def _validate_update_today(config) -> bool:
@@ -138,6 +170,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_sync_caldav.add_argument("--dry-run", action="store_true")
     p_sync_caldav.add_argument("--debug", action="store_true")
 
+    p_doctor = sub.add_parser("doctor")
+    p_doctor.add_argument("--config", default="./config.json")
+    p_doctor.add_argument("--require-caldav", action="store_true")
+
+    p_config = sub.add_parser("config")
+    p_config.add_argument("--config", default="./config.json")
+    p_config_sub = p_config.add_subparsers(dest="config_command", required=True)
+    p_config_get = p_config_sub.add_parser("get")
+    p_config_get.add_argument("key")
+    p_config_set = p_config_sub.add_parser("set")
+    p_config_set.add_argument("key")
+    p_config_set.add_argument("value")
+    p_config_sub.add_parser("edit")
+
+    sub.add_parser("app").add_argument("--config", default="./config.json")
+
     return parser
 
 
@@ -179,13 +227,87 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if not config_exists(args.config):
-        print(f"Config does not exist: {args.config}")
-        return 2
+        if args.command == "app" and sys.stdin.isatty():
+            print(f"Config does not exist: {args.config}")
+            choice = input("Create config now? (wizard/default/cancel): ").strip().lower()
+            if choice == "wizard":
+                run_setup_wizard(args.config)
+            elif choice == "default":
+                save_config(create_default_config(), args.config)
+                print(f"Created default config: {args.config}")
+            else:
+                return 2
+        else:
+            print(f"Config does not exist: {args.config}")
+            return 2
 
     config = load_config(args.config)
 
     if args.command == "validate-config":
         return 0 if _print_validation(config) else 1
+    if args.command == "doctor":
+        write_runtime_log(config, "doctor", "running environment checks")
+        return 0 if _doctor(config, require_caldav=args.require_caldav) else 1
+    if args.command == "config":
+        try:
+            if args.config_command == "get":
+                print(json.dumps({"key": args.key, "value": config_get(args.config, args.key)}, ensure_ascii=False))
+                return 0
+            if args.config_command == "set":
+                config_set(args.config, args.key, args.value)
+                print(json.dumps({"updated": args.key}, ensure_ascii=False))
+                return 0
+            if args.config_command == "edit":
+                edit_config_file(args.config)
+                return 0
+        except Exception as exc:
+            print(f"[ERROR] {exc}")
+            return 2
+    if args.command == "app":
+        if not sys.stdin.isatty():
+            print("Interactive app requires a TTY.")
+            return 2
+        while True:
+            print("\\n== wp_log_parser app ==")
+            print("1) doctor")
+            print("2) show sanitized config")
+            print("3) edit config")
+            print("4) list recent posts")
+            print("5) dry-run CalDAV sync")
+            print("6) real CalDAV sync")
+            print("7) view last run report")
+            print("0) exit")
+            choice = input("Select: ").strip()
+            try:
+                if choice == "1":
+                    _doctor(config, require_caldav=False)
+                elif choice == "2":
+                    print(json.dumps(sanitize_config(config), ensure_ascii=False, indent=2))
+                elif choice == "3":
+                    edit_config_file(args.config)
+                    config = load_config(args.config)
+                elif choice == "4":
+                    print(json.dumps(list_posts(config), ensure_ascii=False, indent=2))
+                elif choice == "5":
+                    result = run_caldav_sync(config, dry_run=True)
+                    print(json.dumps(result, ensure_ascii=False, indent=2))
+                elif choice == "6":
+                    confirm = input("Type YES to run real sync: ").strip()
+                    if confirm == "YES":
+                        result = run_caldav_sync(config, dry_run=False)
+                        print(json.dumps(result, ensure_ascii=False, indent=2))
+                elif choice == "7":
+                    last_run = Path(config.error_dir) / "last_run.json"
+                    if last_run.exists():
+                        print(last_run.read_text(encoding="utf-8"))
+                    else:
+                        print("No last run report found.")
+                elif choice == "0":
+                    return 0
+                else:
+                    print("Unknown option.")
+            except Exception as exc:
+                print(f"[ERROR] {exc}")
 
     if args.command == "update-today-ics":
         if not _validate_update_today(config):
@@ -449,6 +571,8 @@ def main(argv: list[str] | None = None) -> int:
         if _debug_enabled(args):
             _print_debug_header(args.command, args.config, config, {"dry_run": args.dry_run})
         try:
+            write_runtime_log(config, "sync-caldav", "starting sync", {"dry_run": args.dry_run})
+            print("[PHASE] source: listing WordPress posts")
             result = run_caldav_sync(config, dry_run=args.dry_run, debug_events=debug_events)
             caldav_counts = {
                 "created": int(result.get("created", 0)),
@@ -474,6 +598,9 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"[DEBUG] event_operation_counts: {caldav_counts}")
                 print(f"[DEBUG] changed_post_count: {result.get('changed_posts')}")
                 print(f"[DEBUG] index_path: {result.get('index_path')}")
+            write_runtime_log(config, "sync-caldav", "sync completed", caldav_counts | {"changed_posts": result.get("changed_posts", 0)})
+            print("[PHASE] complete: sync finished")
+            print(f"[COUNTS] created={caldav_counts['created']} updated={caldav_counts['updated']} deleted={caldav_counts['deleted']} cancelled={caldav_counts['cancelled']} skipped={caldav_counts['skipped']} changed_posts={result.get('changed_posts', 0)}")
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
         except Exception as exc:
