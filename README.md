@@ -6,6 +6,32 @@ This project is for developers and power users who already work with WordPress a
 
 ---
 
+## Status
+
+**Pre-alpha / internal validation build**
+
+This project is **not public-alpha ready yet**. It remains in internal validation until the maintainer completes an end-to-end validation run across setup, publish, service, and sync workflows.
+
+## Before v0.1.0-alpha
+
+- [ ] fresh clone
+- [ ] install script
+- [ ] run script
+- [ ] setup wizard
+- [ ] health summary
+- [ ] recent post list
+- [ ] timeline preview
+- [ ] local ICS generation
+- [ ] today.ics update
+- [ ] local service subscription
+- [ ] CalDAV setup
+- [ ] CalDAV doctor
+- [ ] dry-run sync
+- [ ] real sync
+- [ ] second sync idempotency
+- [ ] Ctrl+C handling
+- [ ] secret redaction
+
 ## Project Overview
 
 `wp_log_parser` is a command-line tool that:
@@ -75,6 +101,18 @@ run.bat
 ```
 
 Inside the interactive app (`python -m wp_log_parser app`) you can run checks, inspect config, and run a dry-run sync.
+
+
+## First-run walkthrough
+
+1. `./install.sh`
+2. `./run.sh`
+3. Guided setup wizard
+4. Health check summary in app
+5. Preview timeline from a selected recent post
+6. Generate/publish local ICS files
+7. Update `today.ics`
+8. Configure CalDAV, run dry-run sync, then real sync
 
 ## Installation
 
@@ -318,6 +356,27 @@ Depending on command and config, output can include:
 - Verify `output_dir` in `config.json`
 - Use verbose command variants where available
 - Check whether the selected post actually contains timed log entries
+
+
+### No timed entries found in sampled posts
+
+- Connection can still be healthy while sampled posts contain no diary-style time lines.
+- Verify target posts begin entries with `H:MM` or `HH:MM`.
+
+### CalDAV not configured
+
+- `ics_base_url` is for subscribing to generated ICS files.
+- `caldav_url` is for uploading events to a CalDAV collection.
+- Configure `caldav_url`, `caldav_username`, and `caldav_password` before sync.
+
+### WordPress post list shows unexpected posts
+
+- Confirm your fetch mode and credentials/path.
+- In wp-cli mode, verify command permissions and accessible WordPress path.
+
+### Caddy/service restart requires sudo
+
+- Restart system-managed services with appropriate elevated privileges.
 
 ## Debugging
 

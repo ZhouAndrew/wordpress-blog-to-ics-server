@@ -94,6 +94,57 @@ def _doctor(config, *, require_caldav: bool = False) -> bool:
     return core_ok
 
 
+
+
+def _caldav_status(config, dry_run_seen: bool) -> tuple[str, str]:
+    if not config.caldav_url.strip():
+        return "not configured", "CalDAV is not configured. Configure CalDAV first or use local ICS mode."
+    if not config.caldav_username.strip() or not config.caldav_password.strip():
+        return "incomplete", "CalDAV configuration is incomplete."
+    if not dry_run_seen:
+        return "needs test", "Run Dry-run CalDAV sync."
+    return "ready", "CalDAV sync is ready."
+
+
+def _print_health_summary(config, health: dict, dry_run_seen: bool) -> None:
+    def _section_status(section: str) -> str:
+        items = health.get(section, [])
+        statuses = {i.get("status") for i in items}
+        if "error" in statuses:
+            return "error"
+        if "warning" in statuses:
+            return "warning"
+        return "OK"
+
+    caldav_state, next_step = _caldav_status(config, dry_run_seen)
+    print("\n== Health summary ==")
+    print(f"WordPress: {_section_status('wordpress_runtime')}")
+    print(f"Parser: {_section_status('parser_runtime')}")
+    print(f"Local ICS: {_section_status('ics_runtime')}")
+    print(f"CalDAV: {caldav_state}")
+    print(f"Next step: {next_step}")
+
+
+def _select_post_interactively(config):
+    posts = list_posts(config)
+    if not posts:
+        print('No posts found.')
+        return None
+    for i, post in enumerate(posts, 1):
+        print(f"  {i}) {post['date']} [{post['status']}] {post['title']} (ID: {post['id']})")
+    raw = input('Select post number (blank=1): ').strip()
+    if not raw:
+        idx = 1
+    elif raw.isdigit():
+        idx = int(raw)
+    else:
+        print("Invalid selection. Please enter a number.")
+        return None
+    if idx < 1 or idx > len(posts):
+        print('Invalid selection.')
+        return None
+    return posts[idx-1]
+
 def _validate_update_today(config) -> bool:
     output_check = validate_output_dir(config.output_dir)
     status = "[OK]" if output_check.ok else "[ERROR]"
@@ -281,15 +332,15 @@ def main(argv: list[str] | None = None) -> int:
             print("Interactive app requires a TTY.")
             return 2
         health = run_health_check(config, full=True, test_caldav_write=False)
-        print(json.dumps(health, ensure_ascii=False, indent=2))
+        dry_run_seen = False
+        _print_health_summary(config, health, dry_run_seen)
         if any(i.get("fixable") for section in health.values() for i in section if i.get("status") in {"warning", "error"}):
             if input("Run repair wizard now? (y/N): ").strip().lower() == "y":
                 run_setup_wizard(args.config)
                 config = load_config(args.config)
-        dry_run_seen = False
         while True:
-            print("\\n== wp_log_parser app ==")
-            print("1) Run runtime health check again")
+            print("\n== wp_log_parser app ==")
+            print("1) Run runtime health check")
             print("2) Repair configuration")
             print("3) Show sanitized config")
             print("4) List recent posts")
@@ -298,54 +349,96 @@ def main(argv: list[str] | None = None) -> int:
             print("7) Real CalDAV sync")
             print("8) View last run report")
             print("9) View last health report")
+            print("10) Generate local ICS files")
+            print("11) Update today.ics")
+            print("12) Start local ICS service (runs until Ctrl+C)")
+            print("13) Show detailed health JSON")
             print("0) exit")
-            choice = input("Select: ").strip()
             try:
+                choice = input("Select: ").strip()
                 if choice == "1":
-                    print(json.dumps(run_health_check(config, full=True), ensure_ascii=False, indent=2))
+                    health = run_health_check(config, full=True)
+                    _print_health_summary(config, health, dry_run_seen)
                 elif choice == "2":
-                    run_setup_wizard(args.config)
-                    config = load_config(args.config)
+                    run_setup_wizard(args.config); config = load_config(args.config)
                 elif choice == "3":
                     print(json.dumps(sanitize_config(config), ensure_ascii=False, indent=2))
                 elif choice == "4":
-                    print(json.dumps(list_posts(config), ensure_ascii=False, indent=2))
-                elif choice == "5":
                     posts = list_posts(config)
                     if not posts:
-                        print("No posts found.")
+                        print("No recent posts found.")
                     else:
-                        post = fetch_post(config, int(posts[0]["id"]))
-                        parsed = parse_post_content(post.post_content, normalize_post_date(post.post_date), config)
+                        print("\nRecent posts (newest first):")
+                        for idx, post in enumerate(posts, 1):
+                            print(f"  {idx}) {post['date']} [{post['status']}] {post['title']} (ID: {post['id']})")
+                        if input("View detailed JSON? (y/N): ").strip().lower() == "y":
+                            print(json.dumps(posts, ensure_ascii=False, indent=2))
+                elif choice == "5":
+                    chosen = _select_post_interactively(config)
+                    if not chosen: continue
+                    post = fetch_post(config, int(chosen['id']))
+                    parsed = parse_post_content(post.post_content, normalize_post_date(post.post_date), config)
+                    print(f"Previewing: {chosen['title']} ({chosen['date']}) [{chosen['status']}]")
+                    for e in parsed.entries:
+                        print(f"- start={e.start_time} end={e.end_time or '-'} summary={e.summary} status={e.status}")
+                    print(f"ignored_blocks={len(parsed.ignored_blocks)} warnings={len(parsed.warnings)}")
+                    if input('View detailed JSON? (y/N): ').strip().lower()=='y':
                         print(json.dumps(parsed.to_dict(include_ignored=True), ensure_ascii=False, indent=2))
                 elif choice == "6":
-                    result = run_caldav_sync(config, dry_run=True)
-                    dry_run_seen = True
-                    print(json.dumps(result, ensure_ascii=False, indent=2))
+                    state,_ = _caldav_status(config, dry_run_seen)
+                    if state == "not configured":
+                        print("CalDAV is not configured. Configure CalDAV first or use local ICS mode."); continue
+                    if state == "incomplete":
+                        print("CalDAV configuration is incomplete."); continue
+                    result = run_caldav_sync(config, dry_run=True); dry_run_seen = True; print(json.dumps(result, ensure_ascii=False, indent=2))
                 elif choice == "7":
+                    state,_ = _caldav_status(config, dry_run_seen)
+                    if state == "not configured":
+                        print("CalDAV is not configured. Configure CalDAV first or use local ICS mode."); continue
+                    if state == "incomplete":
+                        print("CalDAV configuration is incomplete."); continue
                     if not dry_run_seen:
-                        print("Run dry-run first (option 6).")
-                        continue
-                    confirm = input("Type YES to run real sync: ").strip()
-                    if confirm == "YES":
-                        result = run_caldav_sync(config, dry_run=False)
-                        print(json.dumps(result, ensure_ascii=False, indent=2))
+                        print("Run dry-run first (option 6)."); continue
+                    if input("Type YES to run real sync: ").strip()=="YES":
+                        print(json.dumps(run_caldav_sync(config, dry_run=False), ensure_ascii=False, indent=2))
                 elif choice == "8":
-                    last_run = Path(config.error_dir) / "last_run.json"
-                    if last_run.exists():
-                        print(last_run.read_text(encoding="utf-8"))
-                    else:
-                        print("No last run report found.")
+                    last_run = Path(config.error_dir) / "last_run.json"; print(last_run.read_text(encoding='utf-8') if last_run.exists() else 'No last run report found.')
                 elif choice == "9":
-                    last_health = Path(config.error_dir) / "last_health_report.json"
-                    if last_health.exists():
-                        print(last_health.read_text(encoding="utf-8"))
-                    else:
-                        print("No last health report found.")
+                    last_health = Path(config.error_dir) / "last_health_report.json"; print(last_health.read_text(encoding='utf-8') if last_health.exists() else 'No last health report found.')
+                elif choice == "10":
+                    days_raw = input("Days to publish (default 7): ").strip()
+                    days = int(days_raw) if days_raw.isdigit() else 7
+                    result = publish_once(config, days=days, verbose=True)
+                    print(f"Published local ICS files for {days} day(s).")
+                    print(json.dumps(result, ensure_ascii=False, indent=2))
+                elif choice == "11":
+                    try:
+                        target = generate_today_ics(config.output_dir, config.timezone, preferred_post_id=None, mode="copy")
+                        print(f"Updated today.ics: {target}")
+                    except FileNotFoundError:
+                        print("No ICS file for today exists yet. Generate local ICS files first.")
+                elif choice == "12":
+                    print(f"Subscription URL: {config.ics_base_url.rstrip('/')}/today.ics")
+                    host = input("Host (default 127.0.0.1): ").strip() or "127.0.0.1"
+                    port_raw = input("Port (default 5333): ").strip()
+                    interval_raw = input("Interval seconds (default 300): ").strip()
+                    days_raw = input("Days window (default 7): ").strip()
+                    run_service_loop(
+                        config,
+                        days=int(days_raw) if days_raw.isdigit() else 7,
+                        interval_seconds=int(interval_raw) if interval_raw.isdigit() else 300,
+                        host=host,
+                        port=int(port_raw) if port_raw.isdigit() else 5333,
+                        verbose=True,
+                    )
+                elif choice == "13":
+                    print(json.dumps(run_health_check(config, full=True), ensure_ascii=False, indent=2))
                 elif choice == "0":
                     return 0
                 else:
                     print("Unknown option.")
+            except KeyboardInterrupt:
+                print("Operation cancelled.")
             except Exception as exc:
                 print(f"[ERROR] {exc}")
 

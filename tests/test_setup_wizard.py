@@ -1,4 +1,4 @@
-from wp_log_parser.setup_wizard import mask_secret, prompt_choice, prompt_int, prompt_post_selection, prompt_yes_no, select_post_id
+from wp_log_parser.setup_wizard import mask_secret, prompt_choice, prompt_int, prompt_post_selection, prompt_yes_no, run_setup_wizard, select_post_id
 
 
 def test_mask_secret():
@@ -45,8 +45,8 @@ def test_select_post_id_uses_config_count(monkeypatch):
         post_selection_count = 7
 
     posts = [
-        {"id": 10, "title": "Oldest", "date": "2026-01-01", "status": "publish"},
         {"id": 99, "title": "Latest", "date": "2026-01-02", "status": "publish"},
+        {"id": 10, "title": "Oldest", "date": "2026-01-01", "status": "publish"},
     ]
     captured = {}
 
@@ -59,3 +59,21 @@ def test_select_post_id_uses_config_count(monkeypatch):
 
     assert select_post_id(DummyConfig()) == 99
     assert captured["per_page"] == 7
+
+
+def test_wizard_summary_masks_caldav_password(monkeypatch, tmp_path, capsys):
+    values = iter([
+        "", "", "", "", "", "", "", "", "", "", "", "", "y", "https://caldav.test/cal", "user", "uid.local", "1", "n"
+    ])
+    monkeypatch.setattr("builtins.input", lambda _=None: next(values))
+    monkeypatch.setattr("getpass.getpass", lambda _=None: "secret-pass")
+    monkeypatch.setattr("wp_log_parser.setup_wizard.prompt_existing_path", lambda *a, **k: ".")
+    monkeypatch.setattr("wp_log_parser.setup_wizard.prompt_directory", lambda *a, **k: str(tmp_path))
+    monkeypatch.setattr("wp_log_parser.setup_wizard.validate_dependencies", lambda: [])
+    monkeypatch.setattr("wp_log_parser.setup_wizard.validate_python_path", lambda _p: type("R", (), {"ok": True, "name": "python", "message": "ok", "details": ""})())
+    monkeypatch.setattr("wp_log_parser.setup_wizard.validate_output_dir", lambda _p: type("R", (), {"ok": True, "name": "dir", "message": "ok", "details": ""})())
+    monkeypatch.setattr("wp_log_parser.setup_wizard.validate_wp_cli", lambda _p: type("R", (), {"ok": True, "name": "wp", "message": "ok", "details": ""})())
+    monkeypatch.setattr("wp_log_parser.setup_wizard.validate_wordpress_path", lambda _p: type("R", (), {"ok": True, "name": "wp_path", "message": "ok", "details": ""})())
+    run_setup_wizard(str(tmp_path / "config.json"))
+    out = capsys.readouterr().out
+    assert "secret-pass" not in out

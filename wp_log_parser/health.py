@@ -63,36 +63,38 @@ def run_health_check(
             report["wordpress_runtime"].append(_item("error", f"failed to list posts: {exc}", fixable=True))
             posts = []
         if posts:
-            sample = sorted(posts, key=lambda p: str(p.get("date", "")), reverse=True)[0]
-            try:
-                post = fetch_post(config, int(sample["id"]))
-            except Exception as exc:
-                report["wordpress_runtime"].append(_item("error", f"failed to fetch sample post: {exc}", {"sample_post_id": sample.get("id")}, True))
+            parsed = None
+            sampled = 0
+            for sample in sorted(posts, key=lambda p: str(p.get("date", "")), reverse=True):
+                sampled += 1
+                try:
+                    post = fetch_post(config, int(sample["id"]))
+                    candidate = parse_post_content(post.post_content, normalize_post_date(post.post_date), config)
+                except Exception as exc:
+                    report["parser_runtime"].append(_item("warning", f"skipped sample post due to error: {exc}", {"sample_post_id": sample.get("id")}, True))
+                    continue
+                if candidate.entries:
+                    parsed = candidate
+                    report["parser_runtime"].append(_item("ok", "parsed sample post with timed entries", {
+                        "sample_post_id": post.post_id, "sample_title": post.title, "sample_post_date": post.post_date,
+                        "entry_count": len(candidate.entries), "ignored_block_count": len(candidate.ignored_blocks), "warning_count": len(candidate.warnings),
+                        "sampled_posts": sampled,
+                    }))
+                    break
+
+            if parsed is None:
+                report["parser_runtime"].append(
+                    _item("warning", "WordPress connection OK, but no timed diary entries were found in sampled posts.", {"sampled_posts": sampled})
+                )
+                report["ics_runtime"].append(
+                    _item("warning", "ics runtime skipped because sampled posts had zero timed entries", {"ics_generation_status": "skipped", "ics_byte_size": 0})
+                )
             else:
                 try:
-                    parsed = parse_post_content(post.post_content, normalize_post_date(post.post_date), config)
-                    report["parser_runtime"].append(_item("warning" if len(parsed.entries) == 0 else "ok", "parsed sample post", {
-                        "sample_post_id": post.post_id, "sample_title": post.title, "sample_post_date": post.post_date,
-                        "entry_count": len(parsed.entries), "ignored_block_count": len(parsed.ignored_blocks), "warning_count": len(parsed.warnings),
-                    }))
+                    ics = generate_ics([e.to_dict() for e in parsed.entries], timezone=config.timezone)
+                    report["ics_runtime"].append(_item("ok", "ics generated", {"ics_generation_status": "ok", "ics_byte_size": len(ics.encode("utf-8"))}))
                 except Exception as exc:
-                    report["parser_runtime"].append(_item("error", f"parser failed: {exc}", fixable=True))
-                    parsed = None
-                if parsed is not None:
-                    if len(parsed.entries) == 0:
-                        report["ics_runtime"].append(
-                            _item(
-                                "warning",
-                                "ics runtime skipped because parsed sample has zero entries",
-                                {"ics_generation_status": "skipped", "ics_byte_size": 0},
-                            )
-                        )
-                    else:
-                        try:
-                            ics = generate_ics([e.to_dict() for e in parsed.entries], timezone=config.timezone)
-                            report["ics_runtime"].append(_item("ok", "ics generated", {"ics_generation_status": "ok", "ics_byte_size": len(ics.encode("utf-8"))}))
-                        except Exception as exc:
-                            report["ics_runtime"].append(_item("error", f"ics generation failed: {exc}", {"ics_generation_status": "error"}, fixable=True))
+                    report["ics_runtime"].append(_item("error", f"ics generation failed: {exc}", {"ics_generation_status": "error"}, fixable=True))
         elif full:
             report["wordpress_runtime"].append(_item("error", "no sample post available", fixable=True))
 
