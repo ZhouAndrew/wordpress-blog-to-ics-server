@@ -10,6 +10,7 @@ from .aliases import find_today_ics_candidates, generate_today_ics, select_today
 from .config import config_exists, create_default_config, load_config, save_config
 from .debug_report import sanitize_config, write_recent_run_snapshot
 from .fetcher import fetch_post, normalize_post_date
+from .health import run_health_check
 from .ics import generate_ics
 from .ics_exporter import write_post_ics
 from .models import LogEntry
@@ -173,6 +174,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_doctor = sub.add_parser("doctor")
     p_doctor.add_argument("--config", default="./config.json")
     p_doctor.add_argument("--require-caldav", action="store_true")
+    p_doctor.add_argument("--full", action="store_true")
+    p_doctor.add_argument("--test-caldav-write", action="store_true")
 
     p_config = sub.add_parser("config")
     p_config.add_argument("--config", default="./config.json")
@@ -247,6 +250,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if _print_validation(config) else 1
     if args.command == "doctor":
         write_runtime_log(config, "doctor", "running environment checks")
+        if args.full:
+            report = run_health_check(
+                config,
+                full=True,
+                test_caldav_write=args.test_caldav_write,
+                require_caldav=args.require_caldav,
+            )
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            has_error = any(item["status"] == "error" for section in report.values() for item in section)
+            return 1 if has_error else 0
         return 0 if _doctor(config, require_caldav=args.require_caldav) else 1
     if args.command == "config":
         try:
@@ -267,41 +280,68 @@ def main(argv: list[str] | None = None) -> int:
         if not sys.stdin.isatty():
             print("Interactive app requires a TTY.")
             return 2
+        health = run_health_check(config, full=True, test_caldav_write=False)
+        print(json.dumps(health, ensure_ascii=False, indent=2))
+        if any(i.get("fixable") for section in health.values() for i in section if i.get("status") in {"warning", "error"}):
+            if input("Run repair wizard now? (y/N): ").strip().lower() == "y":
+                run_setup_wizard(args.config)
+                config = load_config(args.config)
+        dry_run_seen = False
         while True:
             print("\\n== wp_log_parser app ==")
-            print("1) doctor")
-            print("2) show sanitized config")
-            print("3) edit config")
-            print("4) list recent posts")
-            print("5) dry-run CalDAV sync")
-            print("6) real CalDAV sync")
-            print("7) view last run report")
+            print("1) Run runtime health check again")
+            print("2) Repair configuration")
+            print("3) Show sanitized config")
+            print("4) List recent posts")
+            print("5) Preview parsed timeline")
+            print("6) Dry-run CalDAV sync")
+            print("7) Real CalDAV sync")
+            print("8) View last run report")
+            print("9) View last health report")
             print("0) exit")
             choice = input("Select: ").strip()
             try:
                 if choice == "1":
-                    _doctor(config, require_caldav=False)
+                    print(json.dumps(run_health_check(config, full=True), ensure_ascii=False, indent=2))
                 elif choice == "2":
-                    print(json.dumps(sanitize_config(config), ensure_ascii=False, indent=2))
-                elif choice == "3":
-                    edit_config_file(args.config)
+                    run_setup_wizard(args.config)
                     config = load_config(args.config)
+                elif choice == "3":
+                    print(json.dumps(sanitize_config(config), ensure_ascii=False, indent=2))
                 elif choice == "4":
                     print(json.dumps(list_posts(config), ensure_ascii=False, indent=2))
                 elif choice == "5":
-                    result = run_caldav_sync(config, dry_run=True)
-                    print(json.dumps(result, ensure_ascii=False, indent=2))
+                    posts = list_posts(config)
+                    if not posts:
+                        print("No posts found.")
+                    else:
+                        post = fetch_post(config, int(posts[0]["id"]))
+                        parsed = parse_post_content(post.post_content, normalize_post_date(post.post_date), config)
+                        print(json.dumps(parsed.to_dict(include_ignored=True), ensure_ascii=False, indent=2))
                 elif choice == "6":
+                    result = run_caldav_sync(config, dry_run=True)
+                    dry_run_seen = True
+                    print(json.dumps(result, ensure_ascii=False, indent=2))
+                elif choice == "7":
+                    if not dry_run_seen:
+                        print("Run dry-run first (option 6).")
+                        continue
                     confirm = input("Type YES to run real sync: ").strip()
                     if confirm == "YES":
                         result = run_caldav_sync(config, dry_run=False)
                         print(json.dumps(result, ensure_ascii=False, indent=2))
-                elif choice == "7":
+                elif choice == "8":
                     last_run = Path(config.error_dir) / "last_run.json"
                     if last_run.exists():
                         print(last_run.read_text(encoding="utf-8"))
                     else:
                         print("No last run report found.")
+                elif choice == "9":
+                    last_health = Path(config.error_dir) / "last_health_report.json"
+                    if last_health.exists():
+                        print(last_health.read_text(encoding="utf-8"))
+                    else:
+                        print("No last health report found.")
                 elif choice == "0":
                     return 0
                 else:
