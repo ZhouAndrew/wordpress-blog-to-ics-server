@@ -183,4 +183,4 @@ def test_real_sync_requires_dry_run(monkeypatch, capsys):
     monkeypatch.setattr("builtins.input", lambda _p="": next(inputs))
     assert cli.main(["app", "--config", "./config.json"]) == 0
     assert calls == []
-    assert "Run dry-run first" in capsys.readouterr().out
+    assert "CalDAV is not configured" in capsys.readouterr().out

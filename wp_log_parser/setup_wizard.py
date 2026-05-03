@@ -7,6 +7,7 @@ from pathlib import Path
 from .config import AppConfig, create_default_config, save_config
 from .service import list_posts
 from .validators import (
+    validate_caldav_config,
     validate_dependencies,
     validate_output_dir,
     validate_python_path,
@@ -65,17 +66,6 @@ def prompt_choice(label: str, explanation: str, choices: list[str], default: str
         print("Invalid choice. Enter a valid number.")
 
 
-def prompt_post_selection(label: str, explanation: str, posts: list[dict[str, str | int]], default_index: int = 1) -> int:
-    if not posts:
-        raise ValueError("No posts available for selection")
-    default_index = max(1, min(default_index, len(posts)))
-    while True:
-        print(f"\n{label}\n{explanation}")
-        for idx, post in enumerate(posts, 1):
-            print(
-                f"  {idx}) {post['date']} [{post['status']}] {post['title']} (ID: {post['id']})"
-            )
-        
 def prompt_post_selection(
     label: str,
     explanation: str,
@@ -198,8 +188,21 @@ def run_setup_wizard(config_path: str) -> AppConfig:
     )
 
     cfg.ics_base_url = prompt_text("9) ICS base URL", "Public base URL for generated ICS files.", cfg.ics_base_url)
+    print("ics_base_url is for subscribing to generated ICS files.")
+    print("caldav_url is for uploading events to a CalDAV calendar.")
 
-    print("\n10) Environment validation")
+    use_caldav = prompt_yes_no("10) Use CalDAV sync", "Configure CalDAV upload now?", bool(cfg.caldav_url))
+    if use_caldav:
+        cfg.caldav_url = prompt_text("CalDAV URL", "Calendar collection URL for PUT/DELETE operations.", cfg.caldav_url)
+        cfg.caldav_username = prompt_text("CalDAV username", "Username for CalDAV authentication.", cfg.caldav_username)
+        caldav_pwd_default = "" if not cfg.caldav_password else "(hidden default)"
+        print(f"\nCalDAV password\nPassword for CalDAV authentication. [default: {caldav_pwd_default}]")
+        caldav_pwd_input = getpass.getpass("> ")
+        cfg.caldav_password = caldav_pwd_input if caldav_pwd_input else cfg.caldav_password
+        cfg.caldav_uid_domain = prompt_text("CalDAV UID domain", "Domain used when generating deterministic event UIDs.", cfg.caldav_uid_domain)
+        cfg.caldav_deletion_mode = prompt_choice("CalDAV deletion mode", "Delete removed events or cancel them in place.", ["delete", "cancel"], cfg.caldav_deletion_mode)
+
+    print("\n11) Environment validation")
     results = []
     results.extend(validate_dependencies())
     results.append(validate_python_path(cfg.python_path))
@@ -221,8 +224,25 @@ def run_setup_wizard(config_path: str) -> AppConfig:
     print("\nConfiguration summary:")
     summary = asdict(cfg)
     summary["app_password"] = mask_secret(summary["app_password"])
+    summary["caldav_password"] = mask_secret(summary["caldav_password"])
     for key, value in summary.items():
         print(f"  - {key}: {value}")
+
+    if use_caldav:
+        caldav_result = validate_caldav_config(
+            cfg.caldav_url,
+            cfg.caldav_username,
+            cfg.caldav_password,
+            cfg.caldav_uid_domain,
+            cfg.caldav_index_path,
+            required=True,
+        )
+        status = "[OK]" if caldav_result.ok else "[ERROR]"
+        print(f"{status} caldav: {caldav_result.message}")
+        if not caldav_result.ok:
+            if not prompt_yes_no("CalDAV validation failed", "Save config anyway?", False):
+                print("Config not saved.")
+                return cfg
 
     should_save = prompt_yes_no("Save config", f"Write config to {config_path}?", True)
     if should_save:
@@ -242,5 +262,5 @@ def select_post_id(config: AppConfig, per_page: int | None = None) -> int:
         "Select post to fetch",
         "Choose a post from the list below. Enter the number or exact post ID.",
         posts,
-        default_index=len(posts),
+        default_index=1,
     )

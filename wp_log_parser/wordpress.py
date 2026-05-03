@@ -19,13 +19,12 @@ def sort_and_limit_posts(
     posts: list[dict[str, str | int]], limit: int | None = None
 ) -> list[dict[str, str | int]]:
     """
-    Sort posts by date in ascending order (earliest → latest).
-    If limit is specified, return only the most recent N posts.
-    The returned list remains in ascending order with the latest post at the end.
+    Sort posts by date in descending order (latest → earliest).
+    If limit is specified, return only the first N newest posts.
     """
-    sorted_posts = sorted(posts, key=lambda post: post.get("date", ""))
+    sorted_posts = sorted(posts, key=lambda post: post.get("date", ""), reverse=True)
     if limit is not None and limit > 0:
-        return sorted_posts[-limit:]
+        return sorted_posts[:limit]
     return sorted_posts
 
 
@@ -59,7 +58,7 @@ def find_today_post_id_wpcli(wp_path: str, wp_cli_path: str = "wp") -> int:
         "--post_type=post",
         f"--date_query=after={today} 00:00:00,before={today} 23:59:59,inclusive=1",
         "--orderby=date",
-        "--order=asc",
+        "--order=desc",
         "--format=json",
         f"--path={wp_path}",
     ]
@@ -96,7 +95,7 @@ def list_posts_wpcli(
         "--post_type=post",
         "--post_status=any",
         "--orderby=date",
-        "--order=asc",
+        "--order=desc",
         "--fields=ID,post_title,post_date,post_modified_gmt,post_status",
         f"--format=json",
         f"--path={wp_path}",
@@ -170,7 +169,7 @@ def list_posts_rest(
 
     endpoint = (
         f"{base_url.rstrip('/')}/wp-json/wp/v2/posts"
-        f"?context=edit&status=any&orderby=date&order=asc"
+        f"?context=edit&status=any&orderby=date&order=desc"
         f"&per_page={per_page}&page={page}"
         "&_fields=id,title,date,modified_gmt,status"
     )
