@@ -5,7 +5,7 @@ import shutil
 from dataclasses import asdict
 from pathlib import Path
 
-from .config import AppConfig, create_default_config, save_config
+from .config import AppConfig, create_default_config, load_config, save_config
 from .service import list_posts
 from .validators import (
     validate_caldav_config,
@@ -147,7 +147,12 @@ def prompt_directory(label: str, explanation: str, default: str) -> str:
 
 def run_setup_wizard(config_path: str) -> AppConfig:
     print("Welcome to wp_log_parser setup wizard")
-    cfg = create_default_config()
+    if Path(config_path).exists():
+        print(f"Editing existing config: {config_path}")
+        cfg = load_config(config_path)
+    else:
+        print(f"Creating new config: {config_path}")
+        cfg = create_default_config()
 
     cfg.wordpress_mode = prompt_choice(
         "1) Fetch mode",
@@ -171,6 +176,7 @@ def run_setup_wizard(config_path: str) -> AppConfig:
     cfg.python_path = prompt_executable("3) Python path", "Python executable to use.", cfg.python_path)
     cfg.output_dir = prompt_directory("4) Output directory", "Where generated files should go.", cfg.output_dir)
     cfg.error_dir = prompt_directory("Error directory", "Where error payloads should be written.", cfg.error_dir)
+    cfg.logs_dir = prompt_directory("Logs directory", "Where runtime logs should be written.", cfg.logs_dir)
 
     cfg.log_format = prompt_choice(
         "5) Log format",
@@ -216,6 +222,7 @@ def run_setup_wizard(config_path: str) -> AppConfig:
         cfg.caldav_password = caldav_pwd_input if caldav_pwd_input else cfg.caldav_password
         cfg.caldav_uid_domain = prompt_text("CalDAV UID domain", "Domain used when generating deterministic event UIDs.", cfg.caldav_uid_domain)
         cfg.caldav_deletion_mode = prompt_choice("CalDAV deletion mode", "Delete removed events or cancel them in place.", ["delete", "cancel"], cfg.caldav_deletion_mode)
+        cfg.caldav_index_path = prompt_text("CalDAV index path", "Where CalDAV sync state should be stored.", cfg.caldav_index_path)
 
     print("\n11) Environment validation")
     results = []
@@ -223,6 +230,7 @@ def run_setup_wizard(config_path: str) -> AppConfig:
     results.append(validate_python_path(cfg.python_path))
     results.append(validate_output_dir(cfg.output_dir))
     results.append(validate_output_dir(cfg.error_dir))
+    results.append(validate_output_dir(cfg.logs_dir))
 
     if cfg.wordpress_mode == "wpcli":
         results.append(validate_wp_cli(cfg.wp_cli_path))

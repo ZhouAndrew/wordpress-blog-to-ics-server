@@ -3,8 +3,57 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from wp_log_parser import cli
-from wp_log_parser.config import AppConfig
-from wp_log_parser.setup_wizard import run_setup_wizard
+from wp_log_parser.config import AppConfig, load_config, save_config
+
+
+def test_repair_configuration_preserves_unrelated_existing_fields(monkeypatch, tmp_path):
+    config_path = tmp_path / "config.json"
+    existing = AppConfig(
+        timezone="America/Chicago",
+        output_dir=str(tmp_path / "out"),
+        error_dir=str(tmp_path / "err"),
+        logs_dir=str(tmp_path / "runtime-logs"),
+        caldav_url="https://caldav.example/calendars/bob/home/",
+        caldav_username="bob",
+        caldav_password="keep-me",
+        caldav_uid_domain="cal.example",
+        caldav_index_path=str(tmp_path / "state" / "index.json"),
+        custom_parsing_patterns=[
+            {
+                "name": "todo",
+                "regex": r"^\s*(?P<start>\d{1,2}:\d{2})\s+TODO\s+(?P<summary>.*)$",
+                "kind": "point",
+            }
+        ],
+    )
+    save_config(existing, str(config_path))
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr(cli, "run_health_check", lambda *a, **k: {"wordpress_runtime": [], "parser_runtime": [], "ics_runtime": []})
+    monkeypatch.setattr("wp_log_parser.setup_wizard.prompt_executable", lambda _l, _e, default: default)
+    monkeypatch.setattr("wp_log_parser.setup_wizard.prompt_existing_path", lambda _l, _e, default: default)
+    monkeypatch.setattr("wp_log_parser.setup_wizard.prompt_directory", lambda _l, _e, default: default)
+    ok = lambda name: type("R", (), {"ok": True, "name": name, "message": "ok", "details": ""})()
+    monkeypatch.setattr("wp_log_parser.setup_wizard.validate_dependencies", lambda: [])
+    monkeypatch.setattr("wp_log_parser.setup_wizard.validate_python_path", lambda _p: ok("python"))
+    monkeypatch.setattr("wp_log_parser.setup_wizard.validate_output_dir", lambda _p: ok("dir"))
+    monkeypatch.setattr("wp_log_parser.setup_wizard.validate_wp_cli", lambda _p: ok("wp"))
+    monkeypatch.setattr("wp_log_parser.setup_wizard.validate_wordpress_path", lambda _p: ok("wp_path"))
+    monkeypatch.setattr("getpass.getpass", lambda _=None: "")
+
+    inputs = iter(["2", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "y", "0"])
+    monkeypatch.setattr("builtins.input", lambda _p="": next(inputs))
+
+    assert cli.main(["app", "--config", str(config_path)]) == 0
+
+    updated = load_config(str(config_path))
+    assert updated.timezone == existing.timezone
+    assert updated.logs_dir == existing.logs_dir
+    assert updated.caldav_url == existing.caldav_url
+    assert updated.caldav_username == existing.caldav_username
+    assert updated.caldav_password == existing.caldav_password
+    assert updated.caldav_index_path == existing.caldav_index_path
+    assert updated.custom_parsing_patterns == existing.custom_parsing_patterns
 
 
 def test_blocks_dry_run_when_caldav_url_missing(monkeypatch, capsys):
