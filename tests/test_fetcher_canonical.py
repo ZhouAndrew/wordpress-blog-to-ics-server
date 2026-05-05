@@ -7,7 +7,7 @@ import pytest
 
 from wp_log_parser.config import AppConfig
 from wp_log_parser.exceptions import AuthenticationFailedError, MalformedResponseError, PostNotFoundError
-from wp_log_parser.fetcher import PostData, fetch_post
+from wp_log_parser.fetcher import PostData, fetch_post, find_today_post_id
 
 
 class _Response:
@@ -141,3 +141,65 @@ def test_fetch_post_rest_malformed_payloads_raise_consistently(monkeypatch, resp
 
     with pytest.raises(MalformedResponseError):
         fetch_post(_rest_config(), 456)
+
+
+def test_find_today_post_id_uses_configured_timezone_for_wpcli(monkeypatch):
+    config = AppConfig(wordpress_mode="wpcli", wp_path="/var/www/html", wp_cli_path="wp", timezone="America/Los_Angeles")
+
+    class _FrozenDatetime:
+        @classmethod
+        def now(cls, tz=None):
+            import datetime as _dt
+
+            return _dt.datetime(2026, 4, 12, 1, 30, tzinfo=_dt.timezone.utc).astimezone(tz)
+
+    captured = {}
+
+    def _fake_find_today_post_id_wpcli(wp_path, local_date, wp_cli_path="wp"):
+        captured["wp_path"] = wp_path
+        captured["local_date"] = local_date
+        captured["wp_cli_path"] = wp_cli_path
+        return 999
+
+    monkeypatch.setattr("wp_log_parser.fetcher.datetime", _FrozenDatetime)
+    monkeypatch.setattr("wp_log_parser.wordpress.find_today_post_id_wpcli", _fake_find_today_post_id_wpcli)
+
+    assert find_today_post_id(config) == 999
+    assert captured == {"wp_path": "/var/www/html", "local_date": "2026-04-11", "wp_cli_path": "wp"}
+
+
+def test_find_today_post_id_uses_configured_timezone_for_rest(monkeypatch):
+    config = AppConfig(
+        wordpress_mode="rest",
+        base_url="https://example.test",
+        username="u",
+        app_password="p",
+        timezone="Asia/Tokyo",
+    )
+
+    class _FrozenDatetime:
+        @classmethod
+        def now(cls, tz=None):
+            import datetime as _dt
+
+            return _dt.datetime(2026, 4, 11, 15, 30, tzinfo=_dt.timezone.utc).astimezone(tz)
+
+    captured = {}
+
+    def _fake_find_today_post_id_rest(base_url, username, app_password, local_date, verify_ssl=True):
+        captured.update(
+            {
+                "base_url": base_url,
+                "username": username,
+                "app_password": app_password,
+                "local_date": local_date,
+                "verify_ssl": verify_ssl,
+            }
+        )
+        return 321
+
+    monkeypatch.setattr("wp_log_parser.fetcher.datetime", _FrozenDatetime)
+    monkeypatch.setattr("wp_log_parser.wordpress.find_today_post_id_rest", _fake_find_today_post_id_rest)
+
+    assert find_today_post_id(config) == 321
+    assert captured["local_date"] == "2026-04-12"
