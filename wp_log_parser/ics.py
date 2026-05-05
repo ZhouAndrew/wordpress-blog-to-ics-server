@@ -41,7 +41,16 @@ def _coerce_datetime(value: Any) -> datetime | None:
     raise TypeError(f"Unsupported datetime value: {type(value)!r}")
 
 
+def _format_utc_datetime(value: datetime) -> str:
+    if value.tzinfo is not None and value.utcoffset() is not None:
+        value = value.astimezone(dt_timezone.utc)
+    return value.strftime("%Y%m%dT%H%M%SZ")
+
+
 def generate_ics(entries: list[Any], timezone: str = "UTC") -> str:
+    # The timezone argument is retained for caller compatibility. ICS event
+    # datetimes are serialized with the strict UTC form for every event.
+    _ = timezone
     dtstamp = datetime.now(dt_timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     lines = [
         "BEGIN:VCALENDAR",
@@ -61,7 +70,7 @@ def generate_ics(entries: list[Any], timezone: str = "UTC") -> str:
                 "BEGIN:VEVENT",
                 f"UID:{uid_for_entry(entry)}",
                 f"DTSTAMP:{dtstamp}",
-                f"DTSTART;TZID={timezone}:{start_dt.strftime('%Y%m%dT%H%M%S')}",
+                f"DTSTART:{_format_utc_datetime(start_dt)}",
                 "X-WP-LOG-PARSER-MANAGED:TRUE",
             ]
         )
@@ -70,7 +79,7 @@ def generate_ics(entries: list[Any], timezone: str = "UTC") -> str:
             lines.append(f"X-WP-LOG-PARSER-SOURCE:{escape_ics_text(str(source_identity))}")
 
         if end_dt is not None:
-            lines.append(f"DTEND;TZID={timezone}:{end_dt.strftime('%Y%m%dT%H%M%S')}")
+            lines.append(f"DTEND:{_format_utc_datetime(end_dt)}")
 
         lines.append(f"SUMMARY:{escape_ics_text(str(_entry_value(entry, 'summary', '')))}")
         lines.append("END:VEVENT")
