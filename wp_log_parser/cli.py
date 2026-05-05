@@ -18,7 +18,7 @@ from .ics import generate_ics
 from .ics_exporter import write_post_ics
 from .models import LogEntry
 from .parser import parse_post_content
-from .service import fetch_post as fetch_post_legacy, run_today_pipeline
+from .service import run_today_pipeline
 from .service_mode import publish_once, run_service_loop
 from .setup_wizard import run_setup_wizard, select_post_id
 from .sync import run_caldav_sync
@@ -544,8 +544,8 @@ def main(argv: list[str] | None = None) -> int:
                 print("Interactive post selection requires a TTY.")
                 return 2
             post_id = select_post_id(config)
-        post_id, content = fetch_post_legacy(config, post_id)
-        print(json.dumps({"post_id": post_id, "post_content": content}, ensure_ascii=False, indent=2))
+        post = fetch_post(config, post_id)
+        print(json.dumps({"post_id": post.post_id, "post_content": post.post_content}, ensure_ascii=False, indent=2))
         return 0
 
     if args.command == "parse-post":

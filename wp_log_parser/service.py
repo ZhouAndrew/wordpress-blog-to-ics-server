@@ -1,15 +1,10 @@
 from __future__ import annotations
 
 from .config import AppConfig
-from .fetcher import fetch_post as fetch_post_data
-from .fetcher import normalize_post_date
+from .fetcher import PostData, fetch_post as fetch_post_data, fetch_today_post, normalize_post_date
 from .ics import generate_ics
 from .parser import parse_post_content
 from .wordpress import (
-    fetch_post_content_rest,
-    fetch_post_content_wpcli,
-    find_today_post_id_rest,
-    find_today_post_id_wpcli,
     list_posts_rest,
     list_posts_wpcli,
     sort_and_limit_posts,
@@ -32,28 +27,16 @@ def list_posts(config: AppConfig, per_page: int | None = None) -> list[dict[str,
     return posts
 
 
-def fetch_post(config: AppConfig, post_id: int | None = None) -> tuple[int, str]:
-    resolved_id = post_id
-    if config.wordpress_mode == "wpcli":
-        if resolved_id is None:
-            resolved_id = find_today_post_id_wpcli(config.wp_path, config.wp_cli_path)
-        content = fetch_post_content_wpcli(resolved_id, config.wp_path, config.wp_cli_path)
-    else:
-        if resolved_id is None:
-            resolved_id = find_today_post_id_rest(config.base_url, config.username, config.app_password, config.verify_ssl)
-        content = fetch_post_content_rest(
-            config.base_url,
-            resolved_id,
-            config.username,
-            config.app_password,
-            config.verify_ssl,
-        )
-    return resolved_id, content
+def fetch_post(config: AppConfig, post_id: int | None = None) -> PostData:
+    """Compatibility wrapper around the canonical structured fetch path."""
+    if post_id is None:
+        return fetch_today_post(config)
+    return fetch_post_data(config, post_id)
 
 
 def run_today_pipeline(config: AppConfig) -> dict:
-    post_id, _post_content = fetch_post(config, None)
-    post = fetch_post_data(config, post_id)
+    post = fetch_today_post(config)
+    post_id = post.post_id
     parsed = parse_post_content(post.post_content, normalize_post_date(post.post_date), config)
     parsed.post_id = post_id
     parsed.source_id = f"wp:{post_id}"

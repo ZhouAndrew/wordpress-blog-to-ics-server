@@ -31,10 +31,9 @@ def _sample_parsed_post() -> ParsedPost:
 def test_run_today_pipeline_uses_parsed_post_model(monkeypatch) -> None:
     config = AppConfig(timezone="UTC", save_ignored_blocks=True)
 
-    monkeypatch.setattr("wp_log_parser.service.fetch_post", lambda _config, _post_id: (123, "<p>07:45 Breakfast</p>"))
     monkeypatch.setattr(
-        "wp_log_parser.service.fetch_post_data",
-        lambda _config, _post_id: PostData(
+        "wp_log_parser.service.fetch_today_post",
+        lambda _config: PostData(
             post_id=123,
             title="Daily Log",
             post_date="2026-04-11 09:00:00",
@@ -56,10 +55,9 @@ def test_run_today_pipeline_uses_parsed_post_model(monkeypatch) -> None:
 def test_run_today_pipeline_preserves_historical_post_date(monkeypatch) -> None:
     config = AppConfig(timezone="UTC", save_ignored_blocks=True)
 
-    monkeypatch.setattr("wp_log_parser.service.fetch_post", lambda _config, _post_id: (321, "<p>07:45 Breakfast</p>"))
     monkeypatch.setattr(
-        "wp_log_parser.service.fetch_post_data",
-        lambda _config, _post_id: PostData(
+        "wp_log_parser.service.fetch_today_post",
+        lambda _config: PostData(
             post_id=321,
             title="Historical Log",
             post_date="2019-02-03 06:00:00",
@@ -96,10 +94,9 @@ def test_run_today_pipeline_preserves_historical_post_date(monkeypatch) -> None:
 def test_run_today_pipeline_is_stable_across_system_date_changes(monkeypatch) -> None:
     config = AppConfig(timezone="UTC", save_ignored_blocks=True)
 
-    monkeypatch.setattr("wp_log_parser.service.fetch_post", lambda _config, _post_id: (987, "<p>08:00 Start</p>"))
     monkeypatch.setattr(
-        "wp_log_parser.service.fetch_post_data",
-        lambda _config, _post_id: PostData(
+        "wp_log_parser.service.fetch_today_post",
+        lambda _config: PostData(
             post_id=987,
             title="Stable Date Log",
             post_date="2020-01-02T05:00:00+00:00",
