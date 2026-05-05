@@ -1,4 +1,13 @@
-from wp_log_parser.setup_wizard import mask_secret, prompt_choice, prompt_int, prompt_post_selection, prompt_yes_no, run_setup_wizard, select_post_id
+from wp_log_parser.setup_wizard import (
+    mask_secret,
+    prompt_choice,
+    prompt_executable,
+    prompt_int,
+    prompt_post_selection,
+    prompt_yes_no,
+    run_setup_wizard,
+    select_post_id,
+)
 
 
 def test_mask_secret():
@@ -14,6 +23,43 @@ def test_prompt_yes_no_accepts_default(monkeypatch):
 def test_prompt_choice_number(monkeypatch):
     monkeypatch.setattr("builtins.input", lambda _=None: "2")
     assert prompt_choice("Q", "E", ["wpcli", "rest"], "wpcli") == "rest"
+
+
+def test_prompt_executable_accepts_valid_command(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda _=None: "wp")
+    monkeypatch.setattr("wp_log_parser.setup_wizard.shutil.which", lambda value: "/usr/bin/wp" if value == "wp" else None)
+    assert prompt_executable("Q", "E", "wp") == "wp"
+
+
+def test_prompt_executable_retries_for_missing_command(monkeypatch, tmp_path):
+    script = tmp_path / "wp"
+    script.write_text("#!/bin/sh\necho ok\n", encoding="utf-8")
+    script.chmod(0o755)
+    values = iter(["missing-command", str(script)])
+    monkeypatch.setattr("builtins.input", lambda _=None: next(values))
+    monkeypatch.setattr("wp_log_parser.setup_wizard.shutil.which", lambda _value: None)
+    assert prompt_executable("Q", "E", "wp") == str(script)
+
+
+def test_prompt_executable_accepts_valid_path(monkeypatch, tmp_path):
+    script = tmp_path / "python3"
+    script.write_text("#!/bin/sh\necho python\n", encoding="utf-8")
+    script.chmod(0o755)
+    monkeypatch.setattr("builtins.input", lambda _=None: str(script))
+    monkeypatch.setattr("wp_log_parser.setup_wizard.shutil.which", lambda _value: None)
+    assert prompt_executable("Q", "E", "python3") == str(script)
+
+
+def test_prompt_executable_retries_for_invalid_path(monkeypatch, tmp_path):
+    bad = tmp_path / "not-executable"
+    bad.write_text("#!/bin/sh\necho bad\n", encoding="utf-8")
+    good = tmp_path / "good-executable"
+    good.write_text("#!/bin/sh\necho good\n", encoding="utf-8")
+    good.chmod(0o755)
+    values = iter([str(bad), str(good)])
+    monkeypatch.setattr("builtins.input", lambda _=None: next(values))
+    monkeypatch.setattr("wp_log_parser.setup_wizard.shutil.which", lambda _value: None)
+    assert prompt_executable("Q", "E", "python3") == str(good)
 
 
 def test_prompt_int_retries(monkeypatch):
@@ -67,6 +113,7 @@ def test_wizard_summary_masks_caldav_password(monkeypatch, tmp_path, capsys):
     ])
     monkeypatch.setattr("builtins.input", lambda _=None: next(values))
     monkeypatch.setattr("getpass.getpass", lambda _=None: "secret-pass")
+    monkeypatch.setattr("wp_log_parser.setup_wizard.prompt_executable", lambda *a, **k: "python3")
     monkeypatch.setattr("wp_log_parser.setup_wizard.prompt_existing_path", lambda *a, **k: ".")
     monkeypatch.setattr("wp_log_parser.setup_wizard.prompt_directory", lambda *a, **k: str(tmp_path))
     monkeypatch.setattr("wp_log_parser.setup_wizard.validate_dependencies", lambda: [])

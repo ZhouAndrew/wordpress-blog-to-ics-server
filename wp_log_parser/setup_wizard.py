@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import getpass
+import shutil
 from dataclasses import asdict
 from pathlib import Path
 
@@ -120,6 +121,20 @@ def prompt_existing_path(label: str, explanation: str, default: str) -> str:
         print("Path does not exist.")
 
 
+def prompt_executable(label: str, explanation: str, default: str) -> str:
+    while True:
+        value = prompt_text(label, explanation, default)
+        candidate = Path(value).expanduser()
+        if candidate.exists():
+            if candidate.is_file() and candidate.stat().st_mode & 0o111:
+                return str(candidate)
+            print("Path exists but is not an executable file.")
+            continue
+        if shutil.which(value):
+            return value
+        print("Command not found in PATH and path is not an executable file.")
+
+
 def prompt_directory(label: str, explanation: str, default: str) -> str:
     while True:
         value = prompt_text(label, explanation, default)
@@ -142,7 +157,7 @@ def run_setup_wizard(config_path: str) -> AppConfig:
     )
 
     if cfg.wordpress_mode == "wpcli":
-        cfg.wp_cli_path = prompt_text("2) wp command", "Path or command name for wp-cli.", cfg.wp_cli_path)
+        cfg.wp_cli_path = prompt_executable("2) wp command", "Path or command name for wp-cli.", cfg.wp_cli_path)
         cfg.wp_path = prompt_existing_path("WordPress path", "Path to WordPress installation.", cfg.wp_path)
     else:
         cfg.base_url = prompt_text("2) WordPress base URL", "Example: https://example.com", cfg.base_url)
@@ -153,7 +168,7 @@ def run_setup_wizard(config_path: str) -> AppConfig:
         cfg.app_password = pwd_input if pwd_input else cfg.app_password
         cfg.verify_ssl = prompt_yes_no("Verify SSL", "Verify TLS certificate for REST calls.", cfg.verify_ssl)
 
-    cfg.python_path = prompt_text("3) Python path", "Python executable to use.", cfg.python_path)
+    cfg.python_path = prompt_executable("3) Python path", "Python executable to use.", cfg.python_path)
     cfg.output_dir = prompt_directory("4) Output directory", "Where generated files should go.", cfg.output_dir)
     cfg.error_dir = prompt_directory("Error directory", "Where error payloads should be written.", cfg.error_dir)
 
