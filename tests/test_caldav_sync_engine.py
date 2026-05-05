@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from wp_log_parser.config import AppConfig
 from wp_log_parser.fetcher import PostData
+from wp_log_parser.ics import generate_ics
+from wp_log_parser.parser import parse_post_content
 from wp_log_parser.sync.caldav_sync import (
     CalDAVTransport,
     SyncIndex,
@@ -30,6 +32,40 @@ def _post_content(*lines: str) -> str:
     for line in lines:
         blocks.append(f"<!-- wp:paragraph --><p>{line}</p><!-- /wp:paragraph -->")
     return "\n".join(blocks)
+
+
+def _utc_date_lines(ics_payload: str) -> list[str]:
+    return [line for line in ics_payload.splitlines() if line.startswith(("DTSTART", "DTEND"))]
+
+
+def test_local_ics_and_caldav_sync_render_same_utc_instant(tmp_path, monkeypatch) -> None:
+    config = AppConfig(timezone="Asia/Seoul", default_last_event_minutes=0)
+    transport = FakeTransport()
+    idx_path = tmp_path / "sync-index.json"
+    post_content = _post_content("07:45 Breakfast")
+
+    def list_meta(_config: AppConfig):
+        return [{"id": 10, "date": "2026-04-11 00:00:00", "modified_gmt": "2026-04-11 10:00:00"}]
+
+    def fetch(_config: AppConfig, post_id: int):
+        return PostData(
+            post_id=post_id,
+            title="day",
+            post_date="2026-04-11 00:00:00",
+            post_content=post_content,
+            status="publish",
+        )
+
+    monkeypatch.setattr("wp_log_parser.sync.caldav_sync._list_post_metadata", list_meta)
+    monkeypatch.setattr("wp_log_parser.sync.caldav_sync.fetch_post", fetch)
+
+    parsed = parse_post_content(post_content, "2026-04-11", config)
+    local_ics = generate_ics(parsed.entries, timezone=config.timezone)
+    sync_caldav_once(config, index_path=idx_path, uid_domain="example.com", transport=transport)
+
+    caldav_payload = transport.put_payloads["wp-10-20260410T224500Z-1@example.com.ics"]
+    assert _utc_date_lines(local_ics) == ["DTSTART:20260410T224500Z"]
+    assert _utc_date_lines(caldav_payload) == _utc_date_lines(local_ics)
 
 
 def test_sync_twice_without_changes_is_noop(tmp_path, monkeypatch) -> None:
