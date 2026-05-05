@@ -20,7 +20,7 @@ def test_generate_ics_timezone_argument_does_not_shadow_datetime_timezone() -> N
 
     assert "BEGIN:VCALENDAR" in ics
     assert "DTSTAMP:" in ics
-    assert "DTSTART;TZID=Asia/Seoul:20260411T074500" in ics
+    assert "DTSTART:20260411T074500Z" in ics
 
 
 def test_parse_post_content_returns_parsed_post_and_handles_range_and_point() -> None:
