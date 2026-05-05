@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from .exceptions import (
@@ -15,6 +15,45 @@ from .exceptions import (
 )
 
 
+def _parse_post_date(value: object) -> datetime:
+    """Best-effort parse of WordPress post date to a comparable UTC datetime."""
+    if not isinstance(value, str) or not value.strip():
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+    raw = value.strip()
+    candidates = [raw]
+    if raw.endswith("Z"):
+        candidates.append(f"{raw[:-1]}+00:00")
+
+    for candidate in candidates:
+        try:
+            parsed = datetime.fromisoformat(candidate)
+        except ValueError:
+            continue
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            parsed = datetime.strptime(raw, fmt)
+            return parsed.replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+
+    return datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _post_sort_key(post: dict[str, str | int]) -> tuple[datetime, int]:
+    post_datetime = _parse_post_date(post.get("date"))
+    post_id = post.get("id", 0)
+    try:
+        sort_id = int(post_id)
+    except (TypeError, ValueError):
+        sort_id = 0
+    return (post_datetime, sort_id)
+
+
 def sort_and_limit_posts(
     posts: list[dict[str, str | int]], limit: int | None = None
 ) -> list[dict[str, str | int]]:
@@ -22,7 +61,7 @@ def sort_and_limit_posts(
     Sort posts by date in descending order (latest → earliest).
     If limit is specified, return only the first N newest posts.
     """
-    sorted_posts = sorted(posts, key=lambda post: post.get("date", ""), reverse=True)
+    sorted_posts = sorted(posts, key=_post_sort_key, reverse=True)
     if limit is not None and limit > 0:
         return sorted_posts[:limit]
     return sorted_posts
