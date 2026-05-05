@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 import traceback
+from dataclasses import asdict
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .aliases import find_today_ics_candidates, generate_today_ics, select_today_ics, today_date_str
@@ -31,6 +34,71 @@ from .validators import (
     validate_wordpress_path,
     validate_wp_cli,
 )
+
+_DRY_RUN_MARKER_FILE = "caldav_dry_run_marker.json"
+_DRY_RUN_MARKER_MAX_AGE = timedelta(hours=24)
+
+
+def _dry_run_marker_path(config) -> Path:
+    return Path(config.logs_dir) / _DRY_RUN_MARKER_FILE
+
+
+def _config_fingerprint(config) -> str:
+    data = asdict(config)
+    relevant = {
+        "caldav_url": data.get("caldav_url", ""),
+        "caldav_username": data.get("caldav_username", ""),
+        "caldav_uid_domain": data.get("caldav_uid_domain", ""),
+        "caldav_index_path": data.get("caldav_index_path", ""),
+        "caldav_deletion_mode": data.get("caldav_deletion_mode", ""),
+        "wordpress_mode": data.get("wordpress_mode", ""),
+        "wp_path": data.get("wp_path", ""),
+        "base_url": data.get("base_url", ""),
+    }
+    payload = json.dumps(relevant, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _write_dry_run_marker(config, result: dict) -> Path:
+    marker_path = _dry_run_marker_path(config)
+    marker_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "kind": "caldav_dry_run_success",
+        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "config_fingerprint": _config_fingerprint(config),
+        "source_snapshot": {
+            "changed_posts": result.get("changed_posts"),
+            "index_path": result.get("index_path"),
+        },
+    }
+    marker_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return marker_path
+
+
+def _dry_run_marker_compatibility(config) -> tuple[bool, str]:
+    marker_path = _dry_run_marker_path(config)
+    if not marker_path.exists():
+        return False, "No recent dry-run proof found. Run option 6 first."
+    try:
+        payload = json.loads(marker_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False, "Dry-run marker is unreadable. Run option 6 to refresh it."
+    created_raw = payload.get("created_at_utc")
+    if not isinstance(created_raw, str):
+        return False, "Dry-run marker is invalid. Run option 6 to regenerate it."
+    try:
+        created_at = datetime.fromisoformat(created_raw)
+    except ValueError:
+        return False, "Dry-run marker timestamp is invalid. Run option 6."
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    age = datetime.now(timezone.utc) - created_at.astimezone(timezone.utc)
+    if age > _DRY_RUN_MARKER_MAX_AGE:
+        return False, "Dry-run marker is stale (>24h). Run option 6 again, then retry real sync."
+    expected = _config_fingerprint(config)
+    if payload.get("config_fingerprint") != expected:
+        return False, "Dry-run marker is incompatible with current config. Run option 6 to refresh."
+    return True, "CalDAV sync is ready."
 
 
 def _print_validation(config, *, require_caldav: bool = False, include_caldav: bool = True) -> bool:
@@ -101,9 +169,12 @@ def _caldav_status(config, dry_run_seen: bool) -> tuple[str, str]:
         return "not configured", "CalDAV is not configured. Configure CalDAV first or use local ICS mode."
     if not config.caldav_username.strip() or not config.caldav_password.strip():
         return "incomplete", "CalDAV configuration is incomplete."
-    if not dry_run_seen:
-        return "needs test", "Run Dry-run CalDAV sync."
-    return "ready", "CalDAV sync is ready."
+    marker_ok, marker_message = _dry_run_marker_compatibility(config)
+    if not marker_ok and dry_run_seen:
+        return "needs test", "Session dry-run seen, but persisted marker is missing/stale. Run Dry-run CalDAV sync."
+    if not marker_ok:
+        return "needs test", marker_message
+    return "ready", marker_message
 
 
 def _print_health_summary(config, health: dict, dry_run_seen: bool) -> None:
@@ -390,15 +461,20 @@ def main(argv: list[str] | None = None) -> int:
                         print("CalDAV is not configured. Configure CalDAV first or use local ICS mode."); continue
                     if state == "incomplete":
                         print("CalDAV configuration is incomplete."); continue
-                    result = run_caldav_sync(config, dry_run=True); dry_run_seen = True; print(json.dumps(result, ensure_ascii=False, indent=2))
+                    result = run_caldav_sync(config, dry_run=True)
+                    dry_run_seen = True
+                    marker_path = _write_dry_run_marker(config, result)
+                    print(f"Dry-run marker saved: {marker_path}")
+                    print(json.dumps(result, ensure_ascii=False, indent=2))
                 elif choice == "7":
                     state,_ = _caldav_status(config, dry_run_seen)
                     if state == "not configured":
                         print("CalDAV is not configured. Configure CalDAV first or use local ICS mode."); continue
                     if state == "incomplete":
                         print("CalDAV configuration is incomplete."); continue
-                    if not dry_run_seen:
-                        print("Run dry-run first (option 6)."); continue
+                    marker_ok, marker_msg = _dry_run_marker_compatibility(config)
+                    if not marker_ok:
+                        print(f"Real sync blocked: {marker_msg} Remediation: run option 6, then retry option 7."); continue
                     if input("Type YES to run real sync: ").strip()=="YES":
                         print(json.dumps(run_caldav_sync(config, dry_run=False), ensure_ascii=False, indent=2))
                 elif choice == "8":
