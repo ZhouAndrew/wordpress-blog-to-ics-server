@@ -48,15 +48,29 @@ def _dry_run_marker_path(config) -> Path:
 
 def _config_fingerprint(config) -> str:
     data = asdict(config)
+
+    credential_identity = {
+        "username": data.get("caldav_username", ""),
+        "password_sha256": hashlib.sha256(str(data.get("caldav_password", "")).encode("utf-8")).hexdigest(),
+    }
     relevant = {
+        "timezone": data.get("timezone", "UTC"),
+        "default_last_event_minutes": data.get("default_last_event_minutes"),
+        "auto_cross_midnight": data.get("auto_cross_midnight"),
+        "allow_empty_summary": data.get("allow_empty_summary"),
+        "save_ignored_blocks": data.get("save_ignored_blocks"),
+        "custom_parsing_patterns": data.get("custom_parsing_patterns", []),
         "caldav_url": data.get("caldav_url", ""),
-        "caldav_username": data.get("caldav_username", ""),
+        "caldav_credentials": credential_identity,
         "caldav_uid_domain": data.get("caldav_uid_domain", ""),
         "caldav_index_path": data.get("caldav_index_path", ""),
         "caldav_deletion_mode": data.get("caldav_deletion_mode", ""),
+        "verify_ssl": data.get("verify_ssl", True),
         "wordpress_mode": data.get("wordpress_mode", ""),
         "wp_path": data.get("wp_path", ""),
+        "wp_cli_path": data.get("wp_cli_path", ""),
         "base_url": data.get("base_url", ""),
+        "username": data.get("username", ""),
     }
     payload = json.dumps(relevant, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()

@@ -244,6 +244,12 @@ Dry-run (report changes without writing to CalDAV or the index file):
 python -m wp_log_parser sync-caldav --config ./config.json --dry-run
 ```
 
+Interactive app safety gate for real sync:
+
+- The app requires a successful dry-run marker from the last 24 hours before allowing real CalDAV writes.
+- A marker becomes incompatible when sync-affecting configuration changes, including timezone, parser behavior (`custom_parsing_patterns`, `default_last_event_minutes`, cross-midnight/summary handling), WordPress source mode/path, CalDAV target/index/deletion settings, or CalDAV credential identity.
+- Display-only settings (for example `post_selection_count`) are intentionally excluded and do not invalidate the marker.
+
 ### 8) Config operations
 
 ```bash
