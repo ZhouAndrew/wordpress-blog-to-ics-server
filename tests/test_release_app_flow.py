@@ -1,3 +1,7 @@
+import json
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
 from wp_log_parser import cli
 from wp_log_parser.config import AppConfig
 from wp_log_parser.setup_wizard import run_setup_wizard
@@ -162,4 +166,84 @@ def test_real_sync_requires_dry_run_when_caldav_configured(monkeypatch, capsys):
     monkeypatch.setattr("builtins.input", lambda _p="": next(inputs))
     assert cli.main(["app", "--config", "./config.json"]) == 0
     assert calls == []
-    assert "Run dry-run first" in capsys.readouterr().out
+    assert "Real sync blocked" in capsys.readouterr().out
+
+
+def test_dry_run_then_real_sync_allowed(monkeypatch, tmp_path):
+    cfg = AppConfig(
+        caldav_url="https://cal.example",
+        caldav_username="alice",
+        caldav_password="secret",
+        logs_dir=str(tmp_path / "logs"),
+    )
+    monkeypatch.setattr(cli, "config_exists", lambda _path: True)
+    monkeypatch.setattr(cli, "load_config", lambda _path: cfg)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr(cli, "run_health_check", lambda *a, **k: {"wordpress_runtime": [], "parser_runtime": [], "ics_runtime": []})
+    calls = []
+    monkeypatch.setattr(
+        cli,
+        "run_caldav_sync",
+        lambda config, dry_run=False: calls.append(dry_run) or {"dry_run": dry_run, "changed_posts": 1, "index_path": "./output/caldav_sync_index.json"},
+    )
+    inputs = iter(["n", "6", "7", "YES", "0"])
+    monkeypatch.setattr("builtins.input", lambda _p="": next(inputs))
+    assert cli.main(["app", "--config", "./config.json"]) == 0
+    assert calls == [True, False]
+    assert (Path(cfg.logs_dir) / "caldav_dry_run_marker.json").exists()
+
+
+def test_restart_with_no_marker_denied(monkeypatch, capsys, tmp_path):
+    cfg = AppConfig(
+        caldav_url="https://cal.example",
+        caldav_username="alice",
+        caldav_password="secret",
+        logs_dir=str(tmp_path / "logs"),
+    )
+    monkeypatch.setattr(cli, "config_exists", lambda _path: True)
+    monkeypatch.setattr(cli, "load_config", lambda _path: cfg)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr(cli, "run_health_check", lambda *a, **k: {"wordpress_runtime": [], "parser_runtime": [], "ics_runtime": []})
+    called = []
+    monkeypatch.setattr(cli, "run_caldav_sync", lambda config, dry_run=False: called.append(dry_run) or {"dry_run": dry_run})
+    inputs = iter(["n", "7", "0"])
+    monkeypatch.setattr("builtins.input", lambda _p="": next(inputs))
+    assert cli.main(["app", "--config", "./config.json"]) == 0
+    assert called == []
+    out = capsys.readouterr().out
+    assert "Real sync blocked" in out
+    assert "run option 6" in out.lower()
+
+
+def test_stale_or_incompatible_marker_denied(monkeypatch, capsys, tmp_path):
+    cfg = AppConfig(
+        caldav_url="https://cal.example",
+        caldav_username="alice",
+        caldav_password="secret",
+        logs_dir=str(tmp_path / "logs"),
+    )
+    marker = Path(cfg.logs_dir) / "caldav_dry_run_marker.json"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(
+        json.dumps(
+            {
+                "kind": "caldav_dry_run_success",
+                "created_at_utc": (datetime.now(timezone.utc) - timedelta(days=2)).isoformat(),
+                "config_fingerprint": "mismatch",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cli, "config_exists", lambda _path: True)
+    monkeypatch.setattr(cli, "load_config", lambda _path: cfg)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr(cli, "run_health_check", lambda *a, **k: {"wordpress_runtime": [], "parser_runtime": [], "ics_runtime": []})
+    called = []
+    monkeypatch.setattr(cli, "run_caldav_sync", lambda config, dry_run=False: called.append(dry_run) or {"dry_run": dry_run})
+    inputs = iter(["n", "7", "0"])
+    monkeypatch.setattr("builtins.input", lambda _p="": next(inputs))
+    assert cli.main(["app", "--config", "./config.json"]) == 0
+    assert called == []
+    out = capsys.readouterr().out
+    assert "Real sync blocked" in out
+    assert "stale" in out
