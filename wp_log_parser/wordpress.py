@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -125,19 +125,18 @@ def fetch_post_content_wpcli(post_id: int, wp_path: str, wp_cli_path: str = "wp"
     return proc.stdout
 
 
-def find_today_post_id_wpcli(wp_path: str, wp_cli_path: str = "wp") -> int:
+def find_today_post_id_wpcli(wp_path: str, local_date: str, wp_cli_path: str = "wp") -> int:
     if shutil.which(wp_cli_path) is None:
         raise WPCLIUnavailableError(f"wp-cli command not found: {wp_cli_path}")
     if not Path(wp_path).exists():
         raise WordPressPathError(f"WordPress path does not exist: {wp_path}")
 
-    today = date.today().isoformat()
     cmd = [
         wp_cli_path,
         "post",
         "list",
         "--post_type=post",
-        f"--date_query=after={today} 00:00:00,before={today} 23:59:59,inclusive=1",
+        f"--date_query=after={local_date} 00:00:00,before={local_date} 23:59:59,inclusive=1",
         "--orderby=date",
         "--order=desc",
         "--format=json",
@@ -153,7 +152,7 @@ def find_today_post_id_wpcli(wp_path: str, wp_cli_path: str = "wp") -> int:
         raise MalformedResponseError("wp-cli returned invalid JSON") from exc
 
     if not rows:
-        raise PostNotFoundError(f"No post found for date {today}")
+        raise PostNotFoundError(f"No post found for date {local_date}")
     return int(rows[0]["ID"])
 
 
@@ -286,6 +285,7 @@ def find_today_post_id_rest(
     base_url: str,
     username: str,
     app_password: str,
+    local_date: str,
     verify_ssl: bool = True,
 ) -> int:
     try:
@@ -293,10 +293,9 @@ def find_today_post_id_rest(
     except Exception as exc:  # pragma: no cover
         raise MalformedResponseError("requests package is required for REST mode") from exc
 
-    today = date.today().isoformat()
     endpoint = (
-        f"{base_url.rstrip('/')}/wp-json/wp/v2/posts?after={today}T00:00:00"
-        f"&before={today}T23:59:59&context=edit&per_page=1"
+        f"{base_url.rstrip('/')}/wp-json/wp/v2/posts?after={local_date}T00:00:00"
+        f"&before={local_date}T23:59:59&context=edit&per_page=1"
     )
     response = requests.get(endpoint, auth=(username, app_password), verify=verify_ssl, timeout=20)
 
@@ -307,7 +306,7 @@ def find_today_post_id_rest(
 
     payload = response.json()
     if not payload:
-        raise PostNotFoundError(f"No post found for date {today}")
+        raise PostNotFoundError(f"No post found for date {local_date}")
     if "id" not in payload[0]:
         raise MalformedResponseError("REST payload missing id")
     return int(payload[0]["id"])
