@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from datetime import date
-
 from .config import AppConfig
+from .fetcher import fetch_post as fetch_post_data
+from .fetcher import normalize_post_date
 from .ics import generate_ics
 from .parser import parse_post_content
 from .wordpress import (
@@ -52,8 +52,9 @@ def fetch_post(config: AppConfig, post_id: int | None = None) -> tuple[int, str]
 
 
 def run_today_pipeline(config: AppConfig) -> dict:
-    post_id, post_content = fetch_post(config, None)
-    parsed = parse_post_content(post_content, date.today().isoformat(), config)
+    post_id, _post_content = fetch_post(config, None)
+    post = fetch_post_data(config, post_id)
+    parsed = parse_post_content(post.post_content, normalize_post_date(post.post_date), config)
     parsed.post_id = post_id
     parsed.source_id = f"wp:{post_id}"
     payload = parsed.to_dict(include_ignored=config.save_ignored_blocks)

@@ -32,6 +32,16 @@ def test_run_today_pipeline_uses_parsed_post_model(monkeypatch) -> None:
     config = AppConfig(timezone="UTC", save_ignored_blocks=True)
 
     monkeypatch.setattr("wp_log_parser.service.fetch_post", lambda _config, _post_id: (123, "<p>07:45 Breakfast</p>"))
+    monkeypatch.setattr(
+        "wp_log_parser.service.fetch_post_data",
+        lambda _config, _post_id: PostData(
+            post_id=123,
+            title="Daily Log",
+            post_date="2026-04-11 09:00:00",
+            post_content="<p>07:45 Breakfast</p>",
+            status="publish",
+        ),
+    )
     monkeypatch.setattr("wp_log_parser.service.parse_post_content", lambda *_args, **_kwargs: _sample_parsed_post())
 
     payload = run_today_pipeline(config)
@@ -41,6 +51,84 @@ def test_run_today_pipeline_uses_parsed_post_model(monkeypatch) -> None:
     assert payload["entries"][0]["summary"] == "Breakfast"
     assert payload["ignored_blocks"][0]["reason"] == "unsupported_block_type"
     assert "BEGIN:VCALENDAR" in payload["ics_preview"]
+
+
+def test_run_today_pipeline_preserves_historical_post_date(monkeypatch) -> None:
+    config = AppConfig(timezone="UTC", save_ignored_blocks=True)
+
+    monkeypatch.setattr("wp_log_parser.service.fetch_post", lambda _config, _post_id: (321, "<p>07:45 Breakfast</p>"))
+    monkeypatch.setattr(
+        "wp_log_parser.service.fetch_post_data",
+        lambda _config, _post_id: PostData(
+            post_id=321,
+            title="Historical Log",
+            post_date="2019-02-03 06:00:00",
+            post_content="<p>07:45 Breakfast</p>",
+            status="publish",
+        ),
+    )
+
+    def _parse(post_content: str, post_date: str, _config: AppConfig) -> ParsedPost:
+        assert post_content == "<p>07:45 Breakfast</p>"
+        assert post_date == "2019-02-03"
+        return ParsedPost(
+            post_date=post_date,
+            entries=[
+                    LogEntry(
+                        date=post_date,
+                        start_time="07:45",
+                        end_time=None,
+                        summary="Breakfast",
+                        raw="<p>07:45 Breakfast</p>",
+                        status="needs_review",
+                        start_dt=datetime(2019, 2, 3, 7, 45),
+                    )
+            ],
+        )
+
+    monkeypatch.setattr("wp_log_parser.service.parse_post_content", _parse)
+
+    payload = run_today_pipeline(config)
+    assert payload["post_date"] == "2019-02-03"
+    assert payload["entries"][0]["date"] == "2019-02-03"
+
+
+def test_run_today_pipeline_is_stable_across_system_date_changes(monkeypatch) -> None:
+    config = AppConfig(timezone="UTC", save_ignored_blocks=True)
+
+    monkeypatch.setattr("wp_log_parser.service.fetch_post", lambda _config, _post_id: (987, "<p>08:00 Start</p>"))
+    monkeypatch.setattr(
+        "wp_log_parser.service.fetch_post_data",
+        lambda _config, _post_id: PostData(
+            post_id=987,
+            title="Stable Date Log",
+            post_date="2020-01-02T05:00:00+00:00",
+            post_content="<p>08:00 Start</p>",
+            status="publish",
+        ),
+    )
+
+    def _parse(_content: str, post_date: str, _config: AppConfig) -> ParsedPost:
+        return ParsedPost(
+            post_date=post_date,
+            entries=[
+                LogEntry(
+                    date=post_date,
+                    start_time="08:00",
+                    end_time=None,
+                    summary="Start",
+                    raw="<p>08:00 Start</p>",
+                    status="needs_review",
+                    start_dt=datetime(2020, 1, 2, 8, 0),
+                )
+            ],
+        )
+
+    monkeypatch.setattr("wp_log_parser.service.parse_post_content", _parse)
+
+    payload = run_today_pipeline(config)
+    assert payload["post_date"] == "2020-01-02"
+    assert payload["entries"][0]["date"] == "2020-01-02"
 
 
 def test_publish_once_uses_parsed_post_attributes(monkeypatch, tmp_path: Path) -> None:
