@@ -19,6 +19,7 @@ from .ics import generate_ics
 from .ics_exporter import write_post_ics
 from .models import LogEntry
 from .parser import parse_post_content
+from .source_metadata import attach_source_metadata
 from .service import run_today_pipeline
 from .service_mode import publish_once, run_service_loop
 from .setup_wizard import run_setup_wizard, select_post_id
@@ -460,6 +461,7 @@ def main(argv: list[str] | None = None) -> int:
                     if not chosen: continue
                     post = fetch_post(config, int(chosen['id']))
                     parsed = parse_post_content(post.post_content, normalize_post_date(post.post_date), config)
+                    attach_source_metadata(parsed, post)
                     print(f"Previewing: {chosen['title']} ({chosen['date']}) [{chosen['status']}]")
                     for e in parsed.entries:
                         print(f"- start={e.start_time} end={e.end_time or '-'} summary={e.summary} status={e.status}")
@@ -575,7 +577,7 @@ def main(argv: list[str] | None = None) -> int:
         post = fetch_post(config, post_id)
         post_date = normalize_post_date(post.post_date)
         parsed = parse_post_content(post.post_content, post_date, config)
-        parsed.post_id = post.post_id
+        attach_source_metadata(parsed, post)
         print(json.dumps(parsed.to_dict(include_ignored=True), ensure_ascii=False, indent=2))
         return 0
 
@@ -645,6 +647,7 @@ def main(argv: list[str] | None = None) -> int:
             post = fetch_post(config, args.post_id)
             post_date = normalize_post_date(post.post_date)
             parsed = parse_post_content(post.post_content, post_date, config, verbose=args.verbose)
+            attach_source_metadata(parsed, post)
             if not parsed.entries:
                 print("No valid timed log entries found in post.")
                 last_run_path, timestamped_path = write_recent_run_snapshot(
