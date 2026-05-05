@@ -293,6 +293,29 @@ Deletion behavior:
 
 ---
 
+
+## Validation Matrix (Docs ↔ Scripts ↔ CLI)
+
+| Flow | Command / Entry Point | Mode | Expected Status | Notes |
+|---|---|---|---|---|
+| Fetch source via wp-cli | `python -m wp_log_parser post-to-ics --config ./config.json --post-id 10213` | `wordpress_mode=wpcli` | Supported | `--post-id` is required for `post-to-ics`. |
+| Fetch source via REST | `python -m wp_log_parser post-to-ics --config ./config.json --post-id 10213` | `wordpress_mode=rest` | Supported | Requires `base_url`, `username`, `app_password`. |
+| Local ICS batch publish | `python -m wp_log_parser publish-ics --config ./config.json --days 7` | wpcli/rest | Supported | Generates per-post ICS + `index.json` + `index.html`; auto-refreshes `today.ics` when possible. |
+| Today alias update | `python -m wp_log_parser update-today-ics --config ./config.json` | wpcli/rest | Supported | Use `--mode copy` (default) or `--mode symlink`. |
+| Service mode | `python -m wp_log_parser run-ics-service --config ./config.json --days 7 --interval 300 --host 127.0.0.1 --port 5333` | wpcli/rest | Supported | Periodic publish plus local HTTP server. |
+| Dry-run CalDAV sync | `python -m wp_log_parser sync-caldav --config ./config.json --dry-run` | wpcli/rest | Supported | Reports planned changes; does not write CalDAV or sync index. |
+| Real CalDAV sync | `python -m wp_log_parser sync-caldav --config ./config.json` | wpcli/rest | Supported with preconditions | Requires `caldav_url`, `caldav_username`, `caldav_password` and reachable CalDAV collection. |
+| Interactive app launcher | `./run.sh` → `python -m wp_log_parser app --config ./config.json` | wpcli/rest | Supported | `run.sh` only starts the TTY app; no background daemon. |
+
+## Known Limitations (Current)
+
+- `run.sh` opens the interactive TTY app only; it does **not** directly run `publish-ics`, `update-today-ics`, or `run-ics-service`.
+- `install.sh` installs dependencies and optionally runs `init-config --wizard`, but it does not validate WordPress/CalDAV connectivity end-to-end.
+- `publish-ics` requires `--days`; there is no implicit default on that command.
+- `post-to-ics` requires `--post-id`; there is no silent fallback to an arbitrary post.
+- `doctor` validates configuration/environment checks but does not execute a full fetch→parse→export simulation.
+- Automatic tombstone cleanup for `caldav_deletion_mode: "cancel"` is not implemented yet.
+
 ## Command Reference
 
 - `init-config` – create config (optionally with interactive wizard)
