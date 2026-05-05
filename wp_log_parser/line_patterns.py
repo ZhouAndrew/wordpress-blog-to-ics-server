@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from .config import AppConfig
+if TYPE_CHECKING:
+    from .config import AppConfig
 
 RANGE_RE = re.compile(
     r"^\s*(\d{1,2}):([0-5]\d)\s*(?:-|–|—|~)\s*(\d{1,2}):([0-5]\d)\b(.*)$",
@@ -44,17 +46,24 @@ def _normalize_hhmm(value: str | None) -> str | None:
     return _normalize_time(parts[0], parts[1])
 
 
-def _compile_custom_pattern(name: str, regex: str, kind: str) -> CustomPattern:
-    compiled = re.compile(regex, re.DOTALL)
+def _compile_custom_pattern(name: str, regex: str, kind: str, *, field_path: str | None = None) -> CustomPattern:
+    context = field_path or f"custom pattern '{name}'"
+    if kind not in {"point", "range"}:
+        raise ValueError(f"{context} kind/type must be 'point' or 'range'")
+    try:
+        compiled = re.compile(regex, re.DOTALL)
+    except re.error as exc:
+        raise ValueError(f"{context}.regex is invalid: {exc}") from exc
+
     group_names = set(compiled.groupindex.keys())
     if "start" not in group_names:
-        raise ValueError(f"custom pattern '{name}' requires named group 'start'")
+        raise ValueError(f"{context} requires named group 'start'")
     if kind == "range" and "end" not in group_names:
-        raise ValueError(f"custom pattern '{name}' with kind=range requires named group 'end'")
+        raise ValueError(f"{context} with kind=range requires named group 'end'")
     return CustomPattern(name=name, regex=regex, kind=kind, compiled=compiled)
 
 
-def _custom_patterns(config: AppConfig) -> list[CustomPattern]:
+def _custom_patterns(config: "AppConfig") -> list[CustomPattern]:
     patterns: list[CustomPattern] = []
     raw_patterns = getattr(config, "custom_parsing_patterns", []) or []
     for i, raw in enumerate(raw_patterns, start=1):
@@ -65,15 +74,32 @@ def _custom_patterns(config: AppConfig) -> list[CustomPattern]:
         else:
             item = dict(raw)
             name = str(item.get("name", f"custom_{i}"))
+            if "regex" not in item:
+                raise ValueError(f"custom_parsing_patterns[{i}] object requires string field 'regex'")
             regex = str(item["regex"])
-            kind = str(item.get("kind", "point"))
-        patterns.append(_compile_custom_pattern(name=name, regex=regex, kind=kind))
+            kind = str(item.get("kind", item.get("type", "point")))
+        patterns.append(
+            _compile_custom_pattern(
+                name=name,
+                regex=regex,
+                kind=kind,
+                field_path=f"custom_parsing_patterns[{i}]",
+            )
+        )
     return patterns
 
 
-def parse_log_line(line: str, config: AppConfig) -> ParsedLine | None:
+def compile_custom_patterns(config: "AppConfig") -> list[CustomPattern]:
+    return _custom_patterns(config)
+
+
+def parse_log_line(
+    line: str,
+    config: "AppConfig",
+    custom_patterns: list[CustomPattern] | None = None,
+) -> ParsedLine | None:
     # 1) custom patterns first
-    for pattern in _custom_patterns(config):
+    for pattern in custom_patterns if custom_patterns is not None else _custom_patterns(config):
         m = pattern.compiled.match(line)
         if not m:
             continue

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .exceptions import ConfigError
+from .line_patterns import _compile_custom_pattern
 
 
 @dataclass
@@ -102,16 +103,36 @@ def load_config(path: str) -> AppConfig:
     normalized_patterns: list[dict[str, Any] | str] = []
     for i, pattern in enumerate(patterns, start=1):
         if isinstance(pattern, str):
+            try:
+                _compile_custom_pattern(
+                    name=f"custom_{i}",
+                    regex=pattern,
+                    kind="point",
+                    field_path=f"custom_parsing_patterns[{i}]",
+                )
+            except ValueError as exc:
+                raise ConfigError(str(exc)) from exc
             normalized_patterns.append(pattern)
             continue
         if not isinstance(pattern, dict):
             raise ConfigError(f"custom_parsing_patterns[{i}] must be string or object")
         if "regex" not in pattern or not isinstance(pattern["regex"], str):
             raise ConfigError(f"custom_parsing_patterns[{i}] object requires string field 'regex'")
-        kind = pattern.get("kind", "point")
+        kind = pattern.get("kind", pattern.get("type", "point"))
+        if "kind" in pattern and "type" in pattern and pattern["kind"] != pattern["type"]:
+            raise ConfigError(f"custom_parsing_patterns[{i}] kind and type must match when both are set")
         if kind not in {"point", "range"}:
-            raise ConfigError(f"custom_parsing_patterns[{i}] kind must be 'point' or 'range'")
+            raise ConfigError(f"custom_parsing_patterns[{i}] kind/type must be 'point' or 'range'")
         name = pattern.get("name") or f"custom_{i}"
+        try:
+            _compile_custom_pattern(
+                name=str(name),
+                regex=pattern["regex"],
+                kind=kind,
+                field_path=f"custom_parsing_patterns[{i}]",
+            )
+        except ValueError as exc:
+            raise ConfigError(str(exc)) from exc
         normalized_patterns.append({"name": str(name), "regex": pattern["regex"], "kind": kind})
     data["custom_parsing_patterns"] = normalized_patterns
 

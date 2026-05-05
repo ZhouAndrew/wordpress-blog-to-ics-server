@@ -14,6 +14,7 @@ from .parser import parse_post_content
 from .service import list_posts
 from .validators import (
     validate_caldav_config,
+    validate_custom_parsing_patterns,
     validate_dependencies,
     validate_output_dir,
     validate_python_path,
@@ -44,6 +45,18 @@ def run_health_check(
         "caldav_runtime": [], "caldav_write_test": [], "logs": [],
     }
     report["config"].append(_item("ok", "sanitized config loaded", sanitize_config(config), False))
+    parser_config = validate_custom_parsing_patterns(config)
+    report["config"].append(
+        _item(
+            "ok" if parser_config.ok else "error",
+            parser_config.message,
+            {"name": parser_config.name},
+            fixable=not parser_config.ok,
+        )
+    )
+    if not parser_config.ok:
+        _write_health_files(config, report)
+        return report
 
     for c in [*validate_dependencies(), validate_python_path(config.python_path), validate_output_dir(config.output_dir), validate_output_dir(config.error_dir), validate_output_dir(config.logs_dir)]:
         report["environment"].append(_item("ok" if c.ok else "error", c.message, {"name": c.name}, fixable=not c.ok))

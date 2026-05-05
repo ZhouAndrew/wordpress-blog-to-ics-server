@@ -6,6 +6,7 @@ import re
 import shutil
 from pathlib import Path
 
+from .line_patterns import compile_custom_patterns
 from .models import ValidationResult
 
 
@@ -61,6 +62,19 @@ def validate_rest_credentials(base_url: str, username: str, app_password: str, v
         return ValidationResult(False, "rest", "REST endpoint request failed", str(exc))
 
     return ValidationResult(True, "rest", "REST configuration looks reachable", None)
+
+
+def validate_custom_parsing_patterns(config) -> ValidationResult:
+    try:
+        patterns = compile_custom_patterns(config)
+    except (KeyError, TypeError, ValueError) as exc:
+        return ValidationResult(False, "custom_parsing_patterns", str(exc), None)
+    return ValidationResult(
+        True,
+        "custom_parsing_patterns",
+        f"Custom parsing patterns are valid ({len(patterns)} configured)",
+        None,
+    )
 
 
 def validate_dependencies() -> list[ValidationResult]:
