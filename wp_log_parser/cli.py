@@ -11,6 +11,7 @@ from pathlib import Path
 
 from .aliases import find_today_ics_candidates, generate_today_ics, select_today_ics, today_date_str
 from .config import config_exists, create_default_config, load_config, save_config
+from .exceptions import ConfigError
 from .debug_report import sanitize_config, write_recent_run_snapshot
 from .fetcher import fetch_post, normalize_post_date
 from .health import run_health_check
@@ -27,6 +28,7 @@ from .operations import config_get, config_set, edit_config_file, write_runtime_
 from .service import list_posts
 from .validators import (
     validate_caldav_config,
+    validate_custom_parsing_patterns,
     validate_dependencies,
     validate_output_dir,
     validate_python_path,
@@ -104,6 +106,7 @@ def _dry_run_marker_compatibility(config) -> tuple[bool, str]:
 def _print_validation(config, *, require_caldav: bool = False, include_caldav: bool = True) -> bool:
     checks = []
     checks.extend(validate_dependencies())
+    checks.append(validate_custom_parsing_patterns(config))
     checks.append(validate_python_path(config.python_path))
     checks.append(validate_output_dir(config.output_dir))
     checks.append(validate_output_dir(config.error_dir))
@@ -366,7 +369,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Config does not exist: {args.config}")
             return 2
 
-    config = load_config(args.config)
+    try:
+        config = load_config(args.config)
+    except ConfigError as exc:
+        print(f"[ERROR] config: {exc}")
+        return 2
 
     if args.command == "validate-config":
         return 0 if _print_validation(config) else 1
@@ -408,7 +415,11 @@ def main(argv: list[str] | None = None) -> int:
         if any(i.get("fixable") for section in health.values() for i in section if i.get("status") in {"warning", "error"}):
             if input("Run repair wizard now? (y/N): ").strip().lower() == "y":
                 run_setup_wizard(args.config)
-                config = load_config(args.config)
+                try:
+                    config = load_config(args.config)
+                except ConfigError as exc:
+                    print(f"[ERROR] config: {exc}")
+                    return 2
         while True:
             print("\n== wp_log_parser app ==")
             print("1) Run runtime health check")

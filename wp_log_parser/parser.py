@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .config import AppConfig
-from .line_patterns import parse_log_line
+from .line_patterns import compile_custom_patterns, parse_log_line
 from .models import IgnoredBlock, LogEntry, ParsedPost
 from .timeline import apply_timeline
 from .wordpress_blocks import iter_blocks
@@ -13,6 +13,7 @@ def parse_post_content(
     config: AppConfig,
     verbose: bool = False,
 ) -> ParsedPost:
+    custom_patterns = compile_custom_patterns(config)
     entries: list[LogEntry] = []
     ignored_blocks: list[IgnoredBlock] = []
 
@@ -50,7 +51,7 @@ def parse_post_content(
                 print(f"[DEBUG] Ignored block #{block.index}: wp:paragraph (empty paragraph)")
             continue
 
-        parsed_line = parse_log_line(visible, config)
+        parsed_line = parse_log_line(visible, config, custom_patterns)
         if parsed_line is None:
             ignored_blocks.append(
                 IgnoredBlock(
