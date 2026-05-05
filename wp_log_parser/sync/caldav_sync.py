@@ -10,10 +10,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
-from zoneinfo import ZoneInfo
 
 from ..config import AppConfig
 from ..fetcher import fetch_post, normalize_post_date
+from ..ics import to_utc_datetime
 from ..parser import parse_post_content
 from ..source_metadata import attach_source_metadata
 from ..wordpress import list_posts_rest, list_posts_wpcli
@@ -233,9 +233,8 @@ def _vevent_resource(uid: str) -> str:
     return f"{quote(uid, safe='@-_.')}.ics"
 
 
-def _to_utc(naive_dt: datetime, tz_name: str) -> datetime:
-    local_tz = ZoneInfo(tz_name)
-    return naive_dt.replace(tzinfo=local_tz).astimezone(timezone.utc)
+def _to_utc(value: datetime, tz_name: str) -> datetime:
+    return to_utc_datetime(value, tz_name)
 
 
 def _single_event_ics(

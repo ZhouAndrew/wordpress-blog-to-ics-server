@@ -129,15 +129,34 @@ def test_ics_timezone_contract_is_utc_only_without_vtimezone_or_tzid() -> None:
 
     assert "BEGIN:VTIMEZONE" not in ics
     assert "TZID" not in ics
-    assert "DTSTART:20260411T074500Z" in ics
-    assert "DTEND:20260411T081000Z" in ics
-    assert "DTSTART:20260411T081000Z" in ics
+    assert "DTSTART:20260410T224500Z" in ics
+    assert "DTEND:20260410T231000Z" in ics
+    assert "DTSTART:20260410T231000Z" in ics
     date_lines = [line for line in ics.splitlines() if line.startswith(("DTSTART", "DTEND"))]
     assert date_lines == [
-        "DTSTART:20260411T074500Z",
-        "DTEND:20260411T081000Z",
-        "DTSTART:20260411T081000Z",
+        "DTSTART:20260410T224500Z",
+        "DTEND:20260410T231000Z",
+        "DTSTART:20260410T231000Z",
     ]
+
+
+def test_ics_interprets_naive_datetimes_in_supplied_timezone() -> None:
+    entries = [
+        {
+            "date": "2026-04-11",
+            "start_time": "07:45",
+            "end_time": None,
+            "start_dt": "2026-04-11T07:45:00",
+            "end_dt": None,
+            "summary": "Breakfast",
+        }
+    ]
+
+    ics = generate_ics(entries, timezone="Asia/Seoul")
+
+    assert "DTSTART:20260410T224500Z" in ics
+    assert "DTSTART:20260411T074500Z" not in ics
+    assert "TZID" not in ics
 
 
 def test_ics_timezone_contract_converts_aware_datetimes_to_utc_z() -> None:

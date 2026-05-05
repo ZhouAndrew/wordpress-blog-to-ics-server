@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from datetime import datetime, timezone as dt_timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 
 def escape_ics_text(value: str) -> str:
@@ -41,16 +42,22 @@ def _coerce_datetime(value: Any) -> datetime | None:
     raise TypeError(f"Unsupported datetime value: {type(value)!r}")
 
 
-def _format_utc_datetime(value: datetime) -> str:
-    if value.tzinfo is not None and value.utcoffset() is not None:
-        value = value.astimezone(dt_timezone.utc)
-    return value.strftime("%Y%m%dT%H%M%SZ")
+def to_utc_datetime(value: datetime, timezone: str = "UTC") -> datetime:
+    """Return ``value`` as a UTC-aware datetime.
+
+    Naive datetimes are interpreted as local wall-clock times in ``timezone``.
+    Aware datetimes already carry an instant, so they are only normalized to UTC.
+    """
+    if value.tzinfo is None or value.utcoffset() is None:
+        value = value.replace(tzinfo=ZoneInfo(timezone))
+    return value.astimezone(dt_timezone.utc)
+
+
+def _format_utc_datetime(value: datetime, timezone: str) -> str:
+    return to_utc_datetime(value, timezone).strftime("%Y%m%dT%H%M%SZ")
 
 
 def generate_ics(entries: list[Any], timezone: str = "UTC") -> str:
-    # The timezone argument is retained for caller compatibility. ICS event
-    # datetimes are serialized with the strict UTC form for every event.
-    _ = timezone
     dtstamp = datetime.now(dt_timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     lines = [
         "BEGIN:VCALENDAR",
@@ -70,7 +77,7 @@ def generate_ics(entries: list[Any], timezone: str = "UTC") -> str:
                 "BEGIN:VEVENT",
                 f"UID:{uid_for_entry(entry)}",
                 f"DTSTAMP:{dtstamp}",
-                f"DTSTART:{_format_utc_datetime(start_dt)}",
+                f"DTSTART:{_format_utc_datetime(start_dt, timezone)}",
                 "X-WP-LOG-PARSER-MANAGED:TRUE",
             ]
         )
@@ -79,7 +86,7 @@ def generate_ics(entries: list[Any], timezone: str = "UTC") -> str:
             lines.append(f"X-WP-LOG-PARSER-SOURCE:{escape_ics_text(str(source_identity))}")
 
         if end_dt is not None:
-            lines.append(f"DTEND:{_format_utc_datetime(end_dt)}")
+            lines.append(f"DTEND:{_format_utc_datetime(end_dt, timezone)}")
 
         lines.append(f"SUMMARY:{escape_ics_text(str(_entry_value(entry, 'summary', '')))}")
         lines.append("END:VEVENT")
