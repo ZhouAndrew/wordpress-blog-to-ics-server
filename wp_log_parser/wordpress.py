@@ -5,6 +5,7 @@ import shutil
 import subprocess
 from datetime import date, datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 from .exceptions import (
     AuthenticationFailedError,
@@ -65,6 +66,47 @@ def sort_and_limit_posts(
     if limit is not None and limit > 0:
         return sorted_posts[:limit]
     return sorted_posts
+
+
+def list_post_metadata_paginated(
+    *,
+    fetch_page: Callable[[int, int], list[dict[str, str | int]]],
+    per_page: int = 100,
+) -> tuple[list[dict[str, str | int]], bool]:
+    """Fetch post metadata across pages with duplicate protection.
+
+    Returns (rows, pagination_complete). pagination_complete is False when
+    pagination appears unreliable (for example, a page returns only duplicate IDs).
+    """
+    posts: list[dict[str, str | int]] = []
+    page = 1
+    seen_ids: set[int] = set()
+    pagination_complete = True
+
+    while True:
+        page_rows = fetch_page(page, per_page)
+        if not page_rows:
+            break
+
+        new_rows = 0
+        for row in page_rows:
+            post_id = int(row["id"])
+            if post_id in seen_ids:
+                continue
+            seen_ids.add(post_id)
+            if not row.get("modified_gmt"):
+                row["modified_gmt"] = str(row.get("date", ""))
+            posts.append(row)
+            new_rows += 1
+
+        if len(page_rows) < per_page:
+            break
+        if new_rows == 0:
+            pagination_complete = False
+            break
+        page += 1
+
+    return posts, pagination_complete
 
 
 def fetch_post_content_wpcli(post_id: int, wp_path: str, wp_cli_path: str = "wp") -> str:

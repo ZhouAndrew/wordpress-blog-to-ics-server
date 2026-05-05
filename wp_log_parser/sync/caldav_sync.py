@@ -16,7 +16,7 @@ from ..fetcher import fetch_post, normalize_post_date
 from ..ics import to_utc_datetime
 from ..parser import parse_post_content
 from ..source_metadata import attach_source_metadata
-from ..wordpress import list_posts_rest, list_posts_wpcli
+from ..wordpress import list_post_metadata_paginated, list_posts_rest, list_posts_wpcli
 
 
 @dataclass
@@ -269,50 +269,27 @@ def _single_event_ics(
 
 
 def _list_post_metadata(config: AppConfig, per_page: int = 100) -> list[dict[str, Any]]:
-    posts: list[dict[str, Any]] = []
-    page = 1
-    seen_ids: set[int] = set()
-
-    while True:
+    def _fetch_page(page: int, size: int) -> list[dict[str, str | int]]:
         if config.wordpress_mode == "wpcli":
-            page_rows = list_posts_wpcli(
+            return list_posts_wpcli(
                 config.wp_path,
                 config.wp_cli_path,
-                per_page=per_page,
+                per_page=size,
                 limit=None,
                 page=page,
             )
-        else:
-            page_rows = list_posts_rest(
-                config.base_url,
-                config.username,
-                config.app_password,
-                config.verify_ssl,
-                per_page=per_page,
-                limit=None,
-                page=page,
-            )
+        return list_posts_rest(
+            config.base_url,
+            config.username,
+            config.app_password,
+            config.verify_ssl,
+            per_page=size,
+            limit=None,
+            page=page,
+        )
 
-        if not page_rows:
-            break
-
-        new_rows = 0
-        for row in page_rows:
-            post_id = int(row["id"])
-            if post_id in seen_ids:
-                continue
-            seen_ids.add(post_id)
-            if not row.get("modified_gmt"):
-                row["modified_gmt"] = str(row.get("date", ""))
-            posts.append(row)
-            new_rows += 1
-
-        # stop on short page or no new IDs (safety against buggy paging responses)
-        if len(page_rows) < per_page or new_rows == 0:
-            break
-        page += 1
-
-    return posts
+    posts, _ = list_post_metadata_paginated(fetch_page=_fetch_page, per_page=per_page)
+    return [dict(row) for row in posts]
 
 
 def _uid_for_entry(post_id: int, start_utc: datetime, same_start_ordinal: int, uid_domain: str) -> str:
