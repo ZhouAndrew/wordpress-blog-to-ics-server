@@ -17,16 +17,14 @@ from .ics_exporter import (
 )
 from .models import ParsedPost
 from .parser import parse_post_content
+from .source_metadata import attach_source_metadata
 
 
 def publish_post(config: AppConfig, post_id: int, verbose: bool = False) -> dict[str, Any] | None:
     post = fetch_post(config, post_id)
     post_date = normalize_post_date(post.post_date)
     parsed: ParsedPost = parse_post_content(post.post_content, post_date, config, verbose=verbose)
-    parsed.post_id = post.post_id
-    parsed.source_id = f"wp:{post.post_id}"
-    for entry in parsed.entries:
-        entry.source_id = parsed.source_id
+    attach_source_metadata(parsed, post)
 
     if not parsed.entries:
         if verbose:

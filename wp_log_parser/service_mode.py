@@ -19,6 +19,7 @@ from .ics_exporter import (
     write_publish_index_html,
 )
 from .parser import parse_post_content
+from .source_metadata import attach_source_metadata
 
 
 class QuietHTTPRequestHandler(SimpleHTTPRequestHandler):
@@ -37,6 +38,7 @@ def publish_once(config: AppConfig, days: int, verbose: bool = False) -> dict[st
         post = fetch_post(config, post_id)
         post_date = normalize_post_date(post.post_date)
         parsed = parse_post_content(post.post_content, post_date, config, verbose=verbose)
+        attach_source_metadata(parsed, post)
         if not parsed.entries:
             if verbose:
                 print(f"[WARN] Skipped post {post_id}: no valid timed entries")

@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 from ..config import AppConfig
 from ..fetcher import fetch_post, normalize_post_date
 from ..parser import parse_post_content
+from ..source_metadata import attach_source_metadata
 from ..wordpress import list_posts_rest, list_posts_wpcli
 
 
@@ -322,8 +323,7 @@ def _uid_for_entry(post_id: int, start_utc: datetime, same_start_ordinal: int, u
 
 def _render_post_events(post_id: int, post_date: str, post_content: str, config: AppConfig, uid_domain: str) -> list[_RenderedEvent]:
     parsed = parse_post_content(post_content, normalize_post_date(post_date), config)
-    parsed.post_id = post_id
-    parsed.source_id = f"wp:{post_id}"
+    attach_source_metadata(parsed, post_id)
 
     events: list[_RenderedEvent] = []
     same_start_counts: defaultdict[str, int] = defaultdict(int)

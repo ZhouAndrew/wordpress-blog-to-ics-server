@@ -65,12 +65,18 @@ class ParsedPost:
     warnings: list[ParseWarning] = field(default_factory=list)
 
     def to_dict(self, include_ignored: bool = True) -> dict[str, Any]:
+        entries = []
+        for entry in self.entries:
+            item = entry.to_dict()
+            if self.source_id and not item.get("source_id"):
+                item["source_id"] = self.source_id
+            entries.append(item)
         return {
             "post_date": self.post_date,
             "post_id": self.post_id,
             "source_id": self.source_id,
             "managed_by": self.managed_by,
-            "entries": [entry.to_dict() for entry in self.entries],
+            "entries": entries,
             "ignored_blocks": [block.__dict__ for block in self.ignored_blocks] if include_ignored else [],
             "warnings": [item.__dict__ for item in self.warnings],
         }

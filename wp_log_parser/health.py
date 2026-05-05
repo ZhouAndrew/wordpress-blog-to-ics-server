@@ -11,6 +11,7 @@ from .fetcher import fetch_post, normalize_post_date
 from .ics import generate_ics
 from .operations import write_runtime_log
 from .parser import parse_post_content
+from .source_metadata import attach_source_metadata
 from .service import list_posts
 from .validators import (
     validate_caldav_config,
@@ -83,6 +84,7 @@ def run_health_check(
                 try:
                     post = fetch_post(config, int(sample["id"]))
                     candidate = parse_post_content(post.post_content, normalize_post_date(post.post_date), config)
+                    attach_source_metadata(candidate, post)
                 except Exception as exc:
                     report["parser_runtime"].append(_item("warning", f"skipped sample post due to error: {exc}", {"sample_post_id": sample.get("id")}, True))
                     continue
