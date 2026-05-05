@@ -246,12 +246,14 @@ Explicit dry-run (same behavior as default):
 python -m wp_log_parser sync-caldav --config ./config.json --dry-run
 ```
 
+
 Real sync (requires a recent compatible dry-run marker, or explicit override):
 
 ```bash
 python -m wp_log_parser sync-caldav --config ./config.json --apply
 python -m wp_log_parser sync-caldav --config ./config.json --apply --force-real-sync
 ```
+
 
 ### 8) Config operations
 

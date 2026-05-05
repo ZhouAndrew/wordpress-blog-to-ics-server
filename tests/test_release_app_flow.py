@@ -296,3 +296,48 @@ def test_stale_or_incompatible_marker_denied(monkeypatch, capsys, tmp_path):
     out = capsys.readouterr().out
     assert "Real sync blocked" in out
     assert "stale" in out
+
+
+def test_dry_run_marker_incompatible_on_timezone_change(tmp_path):
+    cfg = AppConfig(logs_dir=str(tmp_path / "logs"), timezone="UTC")
+    cli._write_dry_run_marker(cfg, {"changed_posts": 1, "index_path": "./output/index.json"})
+    changed = AppConfig(logs_dir=cfg.logs_dir, timezone="America/Chicago")
+    ok, msg = cli._dry_run_marker_compatibility(changed)
+    assert not ok
+    assert "incompatible" in msg.lower()
+
+
+def test_dry_run_marker_incompatible_on_custom_pattern_change(tmp_path):
+    cfg = AppConfig(logs_dir=str(tmp_path / "logs"), custom_parsing_patterns=[{"name": "x", "regex": r"^\\d", "kind": "point"}])
+    cli._write_dry_run_marker(cfg, {"changed_posts": 1, "index_path": "./output/index.json"})
+    changed = AppConfig(logs_dir=cfg.logs_dir, custom_parsing_patterns=[{"name": "y", "regex": r"^\\d", "kind": "point"}])
+    ok, msg = cli._dry_run_marker_compatibility(changed)
+    assert not ok
+    assert "incompatible" in msg.lower()
+
+
+def test_dry_run_marker_incompatible_on_default_last_event_minutes_change(tmp_path):
+    cfg = AppConfig(logs_dir=str(tmp_path / "logs"), default_last_event_minutes=30)
+    cli._write_dry_run_marker(cfg, {"changed_posts": 1, "index_path": "./output/index.json"})
+    changed = AppConfig(logs_dir=cfg.logs_dir, default_last_event_minutes=45)
+    ok, msg = cli._dry_run_marker_compatibility(changed)
+    assert not ok
+    assert "incompatible" in msg.lower()
+
+
+def test_dry_run_marker_incompatible_on_caldav_url_change(tmp_path):
+    cfg = AppConfig(logs_dir=str(tmp_path / "logs"), caldav_url="https://a.example/caldav/")
+    cli._write_dry_run_marker(cfg, {"changed_posts": 1, "index_path": "./output/index.json"})
+    changed = AppConfig(logs_dir=cfg.logs_dir, caldav_url="https://b.example/caldav/")
+    ok, msg = cli._dry_run_marker_compatibility(changed)
+    assert not ok
+    assert "incompatible" in msg.lower()
+
+
+def test_dry_run_marker_compatible_on_display_only_change(tmp_path):
+    cfg = AppConfig(logs_dir=str(tmp_path / "logs"), post_selection_count=20)
+    cli._write_dry_run_marker(cfg, {"changed_posts": 1, "index_path": "./output/index.json"})
+    changed = AppConfig(logs_dir=cfg.logs_dir, post_selection_count=99)
+    ok, msg = cli._dry_run_marker_compatibility(changed)
+    assert ok
+    assert "ready" in msg.lower()

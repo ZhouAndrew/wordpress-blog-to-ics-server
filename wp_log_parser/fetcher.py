@@ -17,6 +17,7 @@ from .exceptions import (
     WPCLIUnavailableError,
     WordPressPathError,
 )
+from .wordpress import list_posts_rest, list_posts_wpcli
 
 
 @dataclass
@@ -179,10 +180,22 @@ def fetch_post(config: AppConfig, post_id: int | None) -> PostData:
 def find_today_post_id(config: AppConfig) -> int:
     from .wordpress import find_today_post_id_rest, find_today_post_id_wpcli
 
+    try:
+        tz = ZoneInfo(config.timezone)
+    except Exception as exc:
+        raise ValueError(f"Invalid timezone: {config.timezone}") from exc
+    local_today = datetime.now(tz).date().isoformat()
+
     if config.wordpress_mode == "wpcli":
-        return find_today_post_id_wpcli(config.wp_path, config.wp_cli_path)
+        return find_today_post_id_wpcli(config.wp_path, local_today, config.wp_cli_path)
     if config.wordpress_mode == "rest":
-        return find_today_post_id_rest(config.base_url, config.username, config.app_password, config.verify_ssl)
+        return find_today_post_id_rest(
+            config.base_url,
+            config.username,
+            config.app_password,
+            local_today,
+            config.verify_ssl,
+        )
     raise ValueError("wordpress_mode must be either 'wpcli' or 'rest'")
 
 
@@ -191,8 +204,6 @@ def fetch_today_post(config: AppConfig) -> PostData:
 
 
 def list_recent_post_ids(config: AppConfig, days: int) -> list[int]:
-    from .service import list_posts
-
     try:
         tz = ZoneInfo(config.timezone)
     except Exception as exc:
@@ -200,15 +211,61 @@ def list_recent_post_ids(config: AppConfig, days: int) -> list[int]:
     now = datetime.now(tz)
     cutoff = now - timedelta(days=days)
     ids: list[int] = []
-    for post in list_posts(config, per_page=max(config.post_selection_count, 100)):
-        post_date = str(post.get("date", ""))
-        if not post_date:
-            continue
-        dt = _parse_post_date(post_date)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=tz)
-        else:
-            dt = dt.astimezone(tz)
-        if dt >= cutoff:
-            ids.append(int(post["id"]))
+    seen_ids: set[int] = set()
+    pagination_complete = True
+    page = 1
+    per_page = 100
+
+    def _fetch_page(page: int, size: int) -> list[dict[str, str | int]]:
+        if config.wordpress_mode == "wpcli":
+            return list_posts_wpcli(config.wp_path, config.wp_cli_path, per_page=size, limit=None, page=page)
+        return list_posts_rest(
+            config.base_url,
+            config.username,
+            config.app_password,
+            config.verify_ssl,
+            per_page=size,
+            limit=None,
+            page=page,
+        )
+
+    while True:
+        page_rows = _fetch_page(page, per_page)
+        if not page_rows:
+            break
+
+        new_rows = 0
+        crossed_cutoff = False
+        for post in page_rows:
+            post_id = int(post["id"])
+            if post_id in seen_ids:
+                continue
+            seen_ids.add(post_id)
+            new_rows += 1
+
+            post_date = str(post.get("date", ""))
+            if not post_date:
+                continue
+            dt = _parse_post_date(post_date)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=tz)
+            else:
+                dt = dt.astimezone(tz)
+            if dt >= cutoff:
+                ids.append(post_id)
+            else:
+                crossed_cutoff = True
+                break
+
+        if crossed_cutoff:
+            break
+        if len(page_rows) < per_page:
+            break
+        if new_rows == 0:
+            pagination_complete = False
+            break
+        page += 1
+
+    if not pagination_complete:
+        print("Warning: pagination reliability check failed; recent post window may be incomplete.")
     return ids
