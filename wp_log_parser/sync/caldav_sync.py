@@ -13,7 +13,7 @@ from urllib.parse import quote
 
 from ..config import AppConfig
 from ..fetcher import fetch_post, normalize_post_date
-from ..ics import to_utc_datetime
+from ..ics import generate_single_event_ics, to_utc_datetime
 from ..parser import parse_post_content
 from ..source_metadata import attach_source_metadata
 from ..wordpress import list_posts_rest, list_posts_wpcli
@@ -237,35 +237,6 @@ def _to_utc(value: datetime, tz_name: str) -> datetime:
     return to_utc_datetime(value, tz_name)
 
 
-def _single_event_ics(
-    uid: str,
-    summary: str,
-    start_utc: datetime,
-    end_utc: datetime | None,
-    *,
-    sequence: int,
-    status: str = "CONFIRMED",
-) -> str:
-    dtstamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    lines = [
-        "BEGIN:VCALENDAR",
-        "VERSION:2.0",
-        "PRODID:-//wordpress-blog-to-ics-server//EN",
-        "CALSCALE:GREGORIAN",
-        "BEGIN:VEVENT",
-        f"UID:{uid}",
-        f"DTSTAMP:{dtstamp}",
-        f"SEQUENCE:{sequence}",
-        f"STATUS:{status}",
-        f"DTSTART:{start_utc.strftime('%Y%m%dT%H%M%SZ')}",
-        "X-WP-LOG-PARSER-MANAGED:TRUE",
-    ]
-    if end_utc is not None:
-        lines.append(f"DTEND:{end_utc.strftime('%Y%m%dT%H%M%SZ')}")
-    escaped = summary.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
-    lines.append(f"SUMMARY:{escaped}")
-    lines.extend(["END:VEVENT", "END:VCALENDAR"])
-    return "\r\n".join(lines) + "\r\n"
 
 
 def _list_post_metadata(config: AppConfig, per_page: int = 100) -> list[dict[str, Any]]:
@@ -399,11 +370,11 @@ def _cancel_uid(
     cancelled_sequence = (old_event.sequence if old_event is not None else 0) + 1
     cancelled_summary = old_event.summary if old_event is not None else ""
     resource_path = old_event.resource_path if old_event is not None else _vevent_resource(uid)
-    cancelled_payload = _single_event_ics(
+    cancelled_payload = generate_single_event_ics(
         uid=uid,
         summary=cancelled_summary,
-        start_utc=fallback_start,
-        end_utc=fallback_end,
+        start_dt=fallback_start,
+        end_dt=fallback_end,
         sequence=cancelled_sequence,
         status="CANCELLED",
     )
@@ -486,11 +457,11 @@ def sync_caldav_once(
         for uid in sorted(new_uids - old_uids):
             event = new_by_uid[uid]
             prior_event = index.events.get(uid)
-            payload = _single_event_ics(
-                event.uid,
-                event.summary,
-                event.start_utc,
-                event.end_utc,
+            payload = generate_single_event_ics(
+                uid=event.uid,
+                summary=event.summary,
+                start_dt=event.start_utc,
+                end_dt=event.end_utc,
                 sequence=0,
                 status="CONFIRMED",
             )
@@ -531,11 +502,11 @@ def sync_caldav_once(
                 current_sequence = old_event.sequence
             if old_event is not None and (old_event.hash != event.hash or old_event.status != "confirmed"):
                 current_sequence += 1
-                payload = _single_event_ics(
-                    event.uid,
-                    event.summary,
-                    event.start_utc,
-                    event.end_utc,
+                payload = generate_single_event_ics(
+                    uid=event.uid,
+                    summary=event.summary,
+                    start_dt=event.start_utc,
+                    end_dt=event.end_utc,
                     sequence=current_sequence,
                     status="CONFIRMED",
                 )
@@ -555,11 +526,11 @@ def sync_caldav_once(
                         "reason": "restored tombstone" if old_event is not None and old_event.status == "cancelled" else "hash changed",
                     })
             elif old_event is None:
-                payload = _single_event_ics(
-                    event.uid,
-                    event.summary,
-                    event.start_utc,
-                    event.end_utc,
+                payload = generate_single_event_ics(
+                    uid=event.uid,
+                    summary=event.summary,
+                    start_dt=event.start_utc,
+                    end_dt=event.end_utc,
                     sequence=current_sequence,
                     status="CONFIRMED",
                 )

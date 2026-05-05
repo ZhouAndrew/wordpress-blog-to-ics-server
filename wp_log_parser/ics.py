@@ -53,9 +53,40 @@ def to_utc_datetime(value: datetime, timezone: str = "UTC") -> datetime:
     return value.astimezone(dt_timezone.utc)
 
 
-def _format_utc_datetime(value: datetime, timezone: str) -> str:
+def format_ics_utc_datetime(value: datetime, timezone: str = "UTC") -> str:
     return to_utc_datetime(value, timezone).strftime("%Y%m%dT%H%M%SZ")
 
+
+
+def generate_single_event_ics(
+    *,
+    uid: str,
+    summary: str,
+    start_dt: datetime,
+    timezone: str = "UTC",
+    end_dt: datetime | None = None,
+    sequence: int = 0,
+    status: str = "CONFIRMED",
+) -> str:
+    dtstamp = datetime.now(dt_timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//wordpress-blog-to-ics-server//EN",
+        "CALSCALE:GREGORIAN",
+        "BEGIN:VEVENT",
+        f"UID:{uid}",
+        f"DTSTAMP:{dtstamp}",
+        f"SEQUENCE:{sequence}",
+        f"STATUS:{status}",
+        f"DTSTART:{format_ics_utc_datetime(start_dt, timezone)}",
+        "X-WP-LOG-PARSER-MANAGED:TRUE",
+    ]
+    if end_dt is not None:
+        lines.append(f"DTEND:{format_ics_utc_datetime(end_dt, timezone)}")
+    lines.append(f"SUMMARY:{escape_ics_text(summary)}")
+    lines.extend(["END:VEVENT", "END:VCALENDAR"])
+    return "\r\n".join(lines) + "\r\n"
 
 def generate_ics(entries: list[Any], timezone: str = "UTC") -> str:
     dtstamp = datetime.now(dt_timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -77,7 +108,7 @@ def generate_ics(entries: list[Any], timezone: str = "UTC") -> str:
                 "BEGIN:VEVENT",
                 f"UID:{uid_for_entry(entry)}",
                 f"DTSTAMP:{dtstamp}",
-                f"DTSTART:{_format_utc_datetime(start_dt, timezone)}",
+                f"DTSTART:{format_ics_utc_datetime(start_dt, timezone)}",
                 "X-WP-LOG-PARSER-MANAGED:TRUE",
             ]
         )
@@ -86,7 +117,7 @@ def generate_ics(entries: list[Any], timezone: str = "UTC") -> str:
             lines.append(f"X-WP-LOG-PARSER-SOURCE:{escape_ics_text(str(source_identity))}")
 
         if end_dt is not None:
-            lines.append(f"DTEND:{_format_utc_datetime(end_dt, timezone)}")
+            lines.append(f"DTEND:{format_ics_utc_datetime(end_dt, timezone)}")
 
         lines.append(f"SUMMARY:{escape_ics_text(str(_entry_value(entry, 'summary', '')))}")
         lines.append("END:VEVENT")
