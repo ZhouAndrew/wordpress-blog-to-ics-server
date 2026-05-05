@@ -42,7 +42,7 @@ def test_local_ics_and_caldav_sync_render_same_utc_instant(tmp_path, monkeypatch
     config = AppConfig(timezone="Asia/Seoul", default_last_event_minutes=0)
     transport = FakeTransport()
     idx_path = tmp_path / "sync-index.json"
-    post_content = _post_content("07:45 Breakfast")
+    post_content = _post_content("07:45 Breakfast, prep; notes\nextra")
 
     def list_meta(_config: AppConfig):
         return [{"id": 10, "date": "2026-04-11 00:00:00", "modified_gmt": "2026-04-11 10:00:00"}]
@@ -66,6 +66,9 @@ def test_local_ics_and_caldav_sync_render_same_utc_instant(tmp_path, monkeypatch
     caldav_payload = transport.put_payloads["wp-10-20260410T224500Z-1@example.com.ics"]
     assert _utc_date_lines(local_ics) == ["DTSTART:20260410T224500Z"]
     assert _utc_date_lines(caldav_payload) == _utc_date_lines(local_ics)
+    local_summary = [line for line in local_ics.splitlines() if line.startswith("SUMMARY:")][0]
+    caldav_summary = [line for line in caldav_payload.splitlines() if line.startswith("SUMMARY:")][0]
+    assert caldav_summary == local_summary
 
 
 def test_sync_twice_without_changes_is_noop(tmp_path, monkeypatch) -> None:
