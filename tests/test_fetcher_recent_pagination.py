@@ -19,7 +19,7 @@ def test_list_recent_post_ids_paginates_beyond_first_100_and_stops_at_cutoff(mon
     config = AppConfig(wordpress_mode="rest", timezone="UTC")
     now = datetime.now().replace(microsecond=0)
 
-    recent_rows = [_post(1000 - i, now - timedelta(hours=i)) for i in range(120)]
+    recent_rows = [_post(1000 - i, now - timedelta(minutes=30 * i)) for i in range(120)]
     old_rows = [_post(2000 - i, now - timedelta(days=5, hours=i)) for i in range(10)]
 
     pages: dict[int, list[dict[str, str | int]]] = {
@@ -28,19 +28,25 @@ def test_list_recent_post_ids_paginates_beyond_first_100_and_stops_at_cutoff(mon
         3: [],
     }
 
+    requested_pages: list[int] = []
+
     def fake_list_posts_rest(_base_url, _username, _app_password, _verify_ssl, per_page, limit, page):
         assert per_page == 100
         assert limit is None
+        requested_pages.append(page)
         return pages.get(page, [])
 
     monkeypatch.setattr("wp_log_parser.fetcher.list_posts_rest", fake_list_posts_rest)
 
-    ids = list_recent_post_ids(config, days=2)
+    ids = list_recent_post_ids(config, days=3)
 
-    cutoff = datetime.now(ZoneInfo("UTC")) - timedelta(days=2)
+    cutoff = datetime.now(ZoneInfo("UTC")) - timedelta(days=3)
     expected = [
         int(row["id"])
         for row in recent_rows
         if datetime.fromisoformat(str(row["date"])).replace(tzinfo=ZoneInfo("UTC")) >= cutoff
     ]
     assert ids == expected
+
+
+    assert requested_pages == [1, 2]

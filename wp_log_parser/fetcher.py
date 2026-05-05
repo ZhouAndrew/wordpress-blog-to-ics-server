@@ -17,7 +17,7 @@ from .exceptions import (
     WPCLIUnavailableError,
     WordPressPathError,
 )
-from .wordpress import list_post_metadata_paginated, list_posts_rest, list_posts_wpcli
+from .wordpress import list_posts_rest, list_posts_wpcli
 
 
 @dataclass
@@ -199,6 +199,10 @@ def list_recent_post_ids(config: AppConfig, days: int) -> list[int]:
     now = datetime.now(tz)
     cutoff = now - timedelta(days=days)
     ids: list[int] = []
+    seen_ids: set[int] = set()
+    pagination_complete = True
+    page = 1
+    per_page = 100
 
     def _fetch_page(page: int, size: int) -> list[dict[str, str | int]]:
         if config.wordpress_mode == "wpcli":
@@ -213,20 +217,43 @@ def list_recent_post_ids(config: AppConfig, days: int) -> list[int]:
             page=page,
         )
 
-    posts, pagination_complete = list_post_metadata_paginated(fetch_page=_fetch_page, per_page=100)
-    for post in posts:
-        post_date = str(post.get("date", ""))
-        if not post_date:
-            continue
-        dt = _parse_post_date(post_date)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=tz)
-        else:
-            dt = dt.astimezone(tz)
-        if dt >= cutoff:
-            ids.append(int(post["id"]))
-        else:
+    while True:
+        page_rows = _fetch_page(page, per_page)
+        if not page_rows:
             break
+
+        new_rows = 0
+        crossed_cutoff = False
+        for post in page_rows:
+            post_id = int(post["id"])
+            if post_id in seen_ids:
+                continue
+            seen_ids.add(post_id)
+            new_rows += 1
+
+            post_date = str(post.get("date", ""))
+            if not post_date:
+                continue
+            dt = _parse_post_date(post_date)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=tz)
+            else:
+                dt = dt.astimezone(tz)
+            if dt >= cutoff:
+                ids.append(post_id)
+            else:
+                crossed_cutoff = True
+                break
+
+        if crossed_cutoff:
+            break
+        if len(page_rows) < per_page:
+            break
+        if new_rows == 0:
+            pagination_complete = False
+            break
+        page += 1
+
     if not pagination_complete:
         print("Warning: pagination reliability check failed; recent post window may be incomplete.")
     return ids
