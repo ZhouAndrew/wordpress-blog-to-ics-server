@@ -309,6 +309,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_sync_caldav = sub.add_parser("sync-caldav")
     p_sync_caldav.add_argument("--config", default="./config.json")
     p_sync_caldav.add_argument("--dry-run", action="store_true")
+    p_sync_caldav.add_argument("--apply", action="store_true")
+    p_sync_caldav.add_argument("--force-real-sync", action="store_true")
     p_sync_caldav.add_argument("--debug", action="store_true")
 
     p_doctor = sub.add_parser("doctor")
@@ -804,13 +806,25 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "sync-caldav":
+        if args.dry_run and args.apply:
+            print("Cannot combine --dry-run and --apply.")
+            return 2
         debug_events = [] if _debug_enabled(args) else None
+        dry_run = args.dry_run or not args.apply
         if _debug_enabled(args):
-            _print_debug_header(args.command, args.config, config, {"dry_run": args.dry_run})
+            _print_debug_header(args.command, args.config, config, {"dry_run": dry_run, "force_real_sync": args.force_real_sync})
         try:
-            write_runtime_log(config, "sync-caldav", "starting sync", {"dry_run": args.dry_run})
+            if not dry_run and not args.force_real_sync:
+                marker_ok, marker_msg = _dry_run_marker_compatibility(config)
+                if not marker_ok:
+                    print(f"Real sync blocked: {marker_msg} Use --force-real-sync to override deliberately.")
+                    return 1
+            write_runtime_log(config, "sync-caldav", "starting sync", {"dry_run": dry_run})
             print("[PHASE] source: listing WordPress posts")
-            result = run_caldav_sync(config, dry_run=args.dry_run, debug_events=debug_events)
+            result = run_caldav_sync(config, dry_run=dry_run, debug_events=debug_events)
+            if dry_run:
+                marker_path = _write_dry_run_marker(config, result)
+                print(f"Dry-run marker saved: {marker_path}")
             caldav_counts = {
                 "created": int(result.get("created", 0)),
                 "updated": int(result.get("updated", 0)),
@@ -823,7 +837,7 @@ def main(argv: list[str] | None = None) -> int:
                 command=args.command,
                 success=True,
                 config=config,
-                dry_run=args.dry_run,
+                dry_run=dry_run,
                 summary=result,
                 changed_post_count=result.get("changed_posts"),
                 caldav_counts=caldav_counts,
@@ -831,7 +845,7 @@ def main(argv: list[str] | None = None) -> int:
                 debug_operations=debug_events,
             )
             if _debug_enabled(args):
-                print(f"[DEBUG] dry_run: {args.dry_run}")
+                print(f"[DEBUG] dry_run: {dry_run}")
                 print(f"[DEBUG] event_operation_counts: {caldav_counts}")
                 print(f"[DEBUG] changed_post_count: {result.get('changed_posts')}")
                 print(f"[DEBUG] index_path: {result.get('index_path')}")
@@ -849,7 +863,7 @@ def main(argv: list[str] | None = None) -> int:
                     command=args.command,
                     success=False,
                     config=config,
-                    dry_run=args.dry_run,
+                    dry_run=dry_run,
                     debug_operations=debug_events,
                     error=exc,
                 )

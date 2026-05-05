@@ -234,21 +234,26 @@ python -m wp_log_parser run-ics-service --config ./config.json --days 7 --interv
 
 ### 7) Incremental CalDAV sync
 
+Dry-run (default, safe; writes no CalDAV changes and refreshes real-sync marker):
+
 ```bash
 python -m wp_log_parser sync-caldav --config ./config.json
 ```
 
-Dry-run (report changes without writing to CalDAV or the index file):
+Explicit dry-run (same behavior as default):
 
 ```bash
 python -m wp_log_parser sync-caldav --config ./config.json --dry-run
 ```
 
-Interactive app safety gate for real sync:
 
-- The app requires a successful dry-run marker from the last 24 hours before allowing real CalDAV writes.
-- A marker becomes incompatible when sync-affecting configuration changes, including timezone, parser behavior (`custom_parsing_patterns`, `default_last_event_minutes`, cross-midnight/summary handling), WordPress source mode/path, CalDAV target/index/deletion settings, or CalDAV credential identity.
-- Display-only settings (for example `post_selection_count`) are intentionally excluded and do not invalidate the marker.
+Real sync (requires a recent compatible dry-run marker, or explicit override):
+
+```bash
+python -m wp_log_parser sync-caldav --config ./config.json --apply
+python -m wp_log_parser sync-caldav --config ./config.json --apply --force-real-sync
+```
+
 
 ### 8) Config operations
 
@@ -310,7 +315,7 @@ Deletion behavior:
 | Today alias update | `python -m wp_log_parser update-today-ics --config ./config.json` | wpcli/rest | Supported | Use `--mode copy` (default) or `--mode symlink`. |
 | Service mode | `python -m wp_log_parser run-ics-service --config ./config.json --days 7 --interval 300 --host 127.0.0.1 --port 5333` | wpcli/rest | Supported | Periodic publish plus local HTTP server. |
 | Dry-run CalDAV sync | `python -m wp_log_parser sync-caldav --config ./config.json --dry-run` | wpcli/rest | Supported | Reports planned changes; does not write CalDAV or sync index. |
-| Real CalDAV sync | `python -m wp_log_parser sync-caldav --config ./config.json` | wpcli/rest | Supported with preconditions | Requires `caldav_url`, `caldav_username`, `caldav_password` and reachable CalDAV collection. |
+| Real CalDAV sync | `python -m wp_log_parser sync-caldav --config ./config.json --apply` | wpcli/rest | Supported with preconditions | Requires `caldav_url`, `caldav_username`, `caldav_password`, and either a recent compatible dry-run marker or `--force-real-sync`. |
 | Interactive app launcher | `./run.sh` → `python -m wp_log_parser app --config ./config.json` | wpcli/rest | Supported | `run.sh` only starts the TTY app; no background daemon. |
 
 ## Known Limitations (Current)
