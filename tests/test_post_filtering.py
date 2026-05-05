@@ -87,3 +87,29 @@ def test_sort_and_limit_posts_single_post():
     result = sort_and_limit_posts(posts, limit=1)
     assert len(result) == 1
     assert result[0]["id"] == 2  # Only the latest
+
+
+def test_sort_and_limit_posts_mixed_date_formats_newest_first():
+    posts = [
+        {"id": 20, "date": "2026-01-07", "title": "plain-date", "status": "publish"},
+        {"id": 30, "date": "2026-01-07T05:30:00Z", "title": "iso-z", "status": "publish"},
+        {"id": 40, "date": "2026-01-06T23:30:00-06:00", "title": "iso-offset", "status": "publish"},
+        {"id": 10, "date": "2026-01-07 06:00:00", "title": "space-seconds", "status": "publish"},
+    ]
+
+    result = sort_and_limit_posts(posts)
+
+    assert [post["id"] for post in result] == [10, 40, 30, 20]
+
+
+def test_sort_and_limit_posts_invalid_or_missing_dates_fall_back_and_tie_break_on_id():
+    posts = [
+        {"id": 2, "date": "", "title": "missing", "status": "publish"},
+        {"id": 1, "date": "not-a-date", "title": "invalid", "status": "publish"},
+        {"id": 3, "date": "2026-01-01", "title": "valid", "status": "publish"},
+        {"id": 4, "title": "missing-key", "status": "publish"},
+    ]
+
+    result = sort_and_limit_posts(posts)
+
+    assert [post["id"] for post in result] == [3, 4, 2, 1]
