@@ -60,3 +60,46 @@ def test_parse_post_content_returns_parsed_post_and_handles_range_and_point() ->
     reasons = {item.reason for item in parsed.ignored_blocks}
     assert "unsupported_block_type" in reasons
     assert "no_leading_time" in reasons
+
+
+def test_parse_post_content_rendered_html_paragraphs() -> None:
+    post_content = "\n".join(
+        [
+            "<div><p>07:45 Breakfast</p></div>",
+            "<p>Not a log line</p>",
+            "<p>08:30 Enabled Thunderbird on laptop</p>",
+        ]
+    )
+    config = AppConfig(log_format="rendered_html", default_last_event_minutes=0)
+
+    parsed = parse_post_content(post_content, "2026-04-11", config)
+
+    assert [entry.start_time for entry in parsed.entries] == ["07:45", "08:30"]
+    assert [entry.summary for entry in parsed.entries] == ["Breakfast", "Enabled Thunderbird on laptop"]
+    assert parsed.entries[0].end_time == "08:30"
+    assert parsed.entries[1].end_time is None
+    assert {item.reason for item in parsed.ignored_blocks} == {"no_leading_time"}
+
+
+def test_parse_post_content_gutenberg_raw_unchanged() -> None:
+    post_content = "\n".join(
+        [
+            "<!-- wp:paragraph -->",
+            "<p>07:45 Breakfast</p>",
+            "<!-- /wp:paragraph -->",
+            "<!-- wp:image -->",
+            "<figure><img src=\"x.jpg\" /></figure>",
+            "<!-- /wp:image -->",
+            "<!-- wp:paragraph -->",
+            "<p>08:30 Work</p>",
+            "<!-- /wp:paragraph -->",
+        ]
+    )
+    config = AppConfig(log_format="gutenberg_raw", default_last_event_minutes=0)
+
+    parsed = parse_post_content(post_content, "2026-04-11", config)
+
+    assert [entry.start_time for entry in parsed.entries] == ["07:45", "08:30"]
+    assert parsed.entries[0].end_time == "08:30"
+    assert parsed.entries[1].end_time is None
+    assert {item.reason for item in parsed.ignored_blocks} == {"unsupported_block_type"}

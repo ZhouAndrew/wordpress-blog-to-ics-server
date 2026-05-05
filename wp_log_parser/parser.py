@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import re
+
 from .config import AppConfig
+from .extractor import strip_tags
 from .line_patterns import compile_custom_patterns, parse_log_line
 from .models import IgnoredBlock, LogEntry, ParsedPost
 from .timeline import apply_timeline
 from .wordpress_blocks import iter_blocks
+
+
+PARAGRAPH_RE = re.compile(r"<p\b[^>]*>.*?</p>", re.DOTALL | re.IGNORECASE)
 
 
 def parse_post_content(
@@ -17,67 +23,49 @@ def parse_post_content(
     entries: list[LogEntry] = []
     ignored_blocks: list[IgnoredBlock] = []
 
-    blocks = iter_blocks(post_content)
-    if verbose:
-        print(f"[INFO] Extracted Gutenberg blocks: {len(blocks)}")
-        print("[INFO] Scanning blocks for timed paragraph entries")
-
-    for block in blocks:
-        block_type = block.block_type
-        if block_type != "paragraph":
-            ignored_blocks.append(
-                IgnoredBlock(
-                    index=block.index,
-                    type=f"wp:{block_type}",
-                    reason="unsupported_block_type",
-                    raw=block.raw_paragraph_html or "",
-                )
-            )
-            if verbose:
-                print(f"[DEBUG] Ignored block #{block.index}: wp:{block_type} (unsupported block)")
-            continue
-
-        visible = (block.visible_text or "").strip()
+    def _append_parsed_entry(index: int, raw_html: str, visible: str) -> None:
+        nonlocal entries, ignored_blocks
+        visible = visible.strip()
         if not visible:
             ignored_blocks.append(
                 IgnoredBlock(
-                    index=block.index,
+                    index=index,
                     type="wp:paragraph",
                     reason="empty_paragraph",
-                    raw=block.raw_paragraph_html or "",
+                    raw=raw_html,
                 )
             )
             if verbose:
-                print(f"[DEBUG] Ignored block #{block.index}: wp:paragraph (empty paragraph)")
-            continue
+                print(f"[DEBUG] Ignored block #{index}: wp:paragraph (empty paragraph)")
+            return
 
         parsed_line = parse_log_line(visible, config, custom_patterns)
         if parsed_line is None:
             ignored_blocks.append(
                 IgnoredBlock(
-                    index=block.index,
+                    index=index,
                     type="wp:paragraph",
                     reason="no_leading_time",
-                    raw=block.raw_paragraph_html or "",
+                    raw=raw_html,
                 )
             )
             if verbose:
-                print(f"[DEBUG] Ignored block #{block.index}: wp:paragraph (no leading time)")
-            continue
+                print(f"[DEBUG] Ignored block #{index}: wp:paragraph (no leading time)")
+            return
 
         summary = parsed_line.summary.strip()
         if not summary and not config.allow_empty_summary:
             ignored_blocks.append(
                 IgnoredBlock(
-                    index=block.index,
+                    index=index,
                     type="wp:paragraph",
                     reason="empty_summary",
-                    raw=block.raw_paragraph_html or "",
+                    raw=raw_html,
                 )
             )
             if verbose:
-                print(f"[DEBUG] Ignored block #{block.index}: wp:paragraph (empty summary)")
-            continue
+                print(f"[DEBUG] Ignored block #{index}: wp:paragraph (empty summary)")
+            return
 
         entries.append(
             LogEntry(
@@ -85,12 +73,42 @@ def parse_post_content(
                 start_time=parsed_line.start_time,
                 end_time=parsed_line.end_time,
                 summary=summary,
-                raw=block.raw_paragraph_html or "",
+                raw=raw_html,
                 status="needs_review",
             )
         )
         if verbose:
             print(f"[DEBUG] Accepted entry #{len(entries)}: {parsed_line.start_time} {summary}")
+
+    if config.log_format == "rendered_html":
+        paragraphs = list(PARAGRAPH_RE.finditer(post_content))
+        if verbose:
+            print(f"[INFO] Extracted rendered HTML paragraphs: {len(paragraphs)}")
+            print("[INFO] Scanning paragraphs for timed entries")
+        for index, paragraph_match in enumerate(paragraphs, start=1):
+            raw_html = paragraph_match.group(0).strip()
+            _append_parsed_entry(index, raw_html, strip_tags(raw_html))
+    else:
+        blocks = iter_blocks(post_content)
+        if verbose:
+            print(f"[INFO] Extracted Gutenberg blocks: {len(blocks)}")
+            print("[INFO] Scanning blocks for timed paragraph entries")
+
+        for block in blocks:
+            block_type = block.block_type
+            if block_type != "paragraph":
+                ignored_blocks.append(
+                    IgnoredBlock(
+                        index=block.index,
+                        type=f"wp:{block_type}",
+                        reason="unsupported_block_type",
+                        raw=block.raw_paragraph_html or "",
+                    )
+                )
+                if verbose:
+                    print(f"[DEBUG] Ignored block #{block.index}: wp:{block_type} (unsupported block)")
+                continue
+            _append_parsed_entry(block.index, block.raw_paragraph_html or "", block.visible_text or "")
 
     entries, warnings = apply_timeline(entries, config)
 
