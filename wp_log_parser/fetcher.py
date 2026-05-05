@@ -17,6 +17,7 @@ from .exceptions import (
     WPCLIUnavailableError,
     WordPressPathError,
 )
+from .wordpress import list_post_metadata_paginated, list_posts_rest, list_posts_wpcli
 
 
 @dataclass
@@ -191,8 +192,6 @@ def fetch_today_post(config: AppConfig) -> PostData:
 
 
 def list_recent_post_ids(config: AppConfig, days: int) -> list[int]:
-    from .service import list_posts
-
     try:
         tz = ZoneInfo(config.timezone)
     except Exception as exc:
@@ -200,7 +199,22 @@ def list_recent_post_ids(config: AppConfig, days: int) -> list[int]:
     now = datetime.now(tz)
     cutoff = now - timedelta(days=days)
     ids: list[int] = []
-    for post in list_posts(config, per_page=max(config.post_selection_count, 100)):
+
+    def _fetch_page(page: int, size: int) -> list[dict[str, str | int]]:
+        if config.wordpress_mode == "wpcli":
+            return list_posts_wpcli(config.wp_path, config.wp_cli_path, per_page=size, limit=None, page=page)
+        return list_posts_rest(
+            config.base_url,
+            config.username,
+            config.app_password,
+            config.verify_ssl,
+            per_page=size,
+            limit=None,
+            page=page,
+        )
+
+    posts, pagination_complete = list_post_metadata_paginated(fetch_page=_fetch_page, per_page=100)
+    for post in posts:
         post_date = str(post.get("date", ""))
         if not post_date:
             continue
@@ -211,4 +225,8 @@ def list_recent_post_ids(config: AppConfig, days: int) -> list[int]:
             dt = dt.astimezone(tz)
         if dt >= cutoff:
             ids.append(int(post["id"]))
+        else:
+            break
+    if not pagination_complete:
+        print("Warning: pagination reliability check failed; recent post window may be incomplete.")
     return ids
