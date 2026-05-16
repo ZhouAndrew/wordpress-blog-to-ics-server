@@ -252,6 +252,17 @@ def _validate_update_today(config) -> bool:
     return True
 
 
+def _prepare_entries_for_export(entries: list[LogEntry], mode: str) -> list[LogEntry]:
+    if mode == "include":
+        return entries
+    review_entries = [entry for entry in entries if entry.status == "needs_review"]
+    if mode == "skip":
+        return [entry for entry in entries if entry.status != "needs_review"]
+    if review_entries:
+        raise RuntimeError(f"Refusing to export {len(review_entries)} entries with status=needs_review.")
+    return entries
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="wp_log_parser")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -617,7 +628,22 @@ def main(argv: list[str] | None = None) -> int:
                 config,
             )
             entries = [entry.to_dict() for entry in timeline_entries]
-        print(generate_ics(entries, timezone=config.timezone))
+        typed_entries = [
+            LogEntry(
+                date=item["date"],
+                start_time=item["start_time"],
+                end_time=item.get("end_time"),
+                summary=item.get("summary", ""),
+                raw=item.get("raw", ""),
+                status=item.get("status", "needs_review"),
+                source_id=item.get("source_id"),
+                start_dt=datetime.fromisoformat(item["start_dt"]) if item.get("start_dt") else None,
+                end_dt=datetime.fromisoformat(item["end_dt"]) if item.get("end_dt") else None,
+            )
+            for item in entries
+        ]
+        export_entries = _prepare_entries_for_export(typed_entries, config.review_entry_export_mode)
+        print(generate_ics(export_entries, timezone=config.timezone))
         return 0
 
     if args.command == "run-today":
@@ -665,6 +691,10 @@ def main(argv: list[str] | None = None) -> int:
             post_date = normalize_post_date(post.post_date)
             parsed = parse_post_content(post.post_content, post_date, config, verbose=args.verbose)
             attach_source_metadata(parsed, post)
+            if parsed.warnings:
+                print(f"[WARN] Timeline warnings: {len(parsed.warnings)}")
+                for warn in parsed.warnings:
+                    print(f"[WARN] {warn.reason}: {warn.message}")
             if not parsed.entries:
                 print("No valid timed log entries found in post.")
                 last_run_path, timestamped_path = write_recent_run_snapshot(
@@ -680,14 +710,16 @@ def main(argv: list[str] | None = None) -> int:
                 if timestamped_path is not None:
                     print(f"Debug report written to: {timestamped_path}")
                 return 1
-            out_path = write_post_ics(post, parsed.entries, config.output_dir, config.timezone)
+            export_entries = _prepare_entries_for_export(parsed.entries, config.review_entry_export_mode)
+            out_path = write_post_ics(post, export_entries, config.output_dir, config.timezone)
             result = {
                 "post_id": post.post_id,
                 "title": post.title,
                 "post_date": post.post_date,
                 "output_file": str(out_path),
-                "entry_count": len(parsed.entries),
+                "entry_count": len(export_entries),
                 "ignored_block_count": len(parsed.ignored_blocks),
+                "warning_count": len(parsed.warnings),
             }
             _write_snapshot_best_effort(
                 error_dir=config.error_dir,

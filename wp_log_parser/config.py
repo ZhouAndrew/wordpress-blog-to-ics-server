@@ -31,6 +31,8 @@ class AppConfig:
     auto_cross_midnight: bool = True
     save_ignored_blocks: bool = True
     custom_parsing_patterns: list[dict[str, Any] | str] = field(default_factory=list)
+    overlap_policy: str = "needs_review"
+    review_entry_export_mode: str = "include"
     caldav_url: str = ""
     caldav_username: str = ""
     caldav_password: str = ""
@@ -70,6 +72,10 @@ def load_config(path: str) -> AppConfig:
         raise ConfigError("wordpress_mode must be either 'wpcli' or 'rest'")
     if data["log_format"] not in {"gutenberg_raw", "rendered_html"}:
         raise ConfigError("log_format must be 'gutenberg_raw' or 'rendered_html'")
+    if data["overlap_policy"] not in {"warn", "needs_review", "error"}:
+        raise ConfigError("overlap_policy must be 'warn', 'needs_review', or 'error'")
+    if data["review_entry_export_mode"] not in {"include", "skip", "error"}:
+        raise ConfigError("review_entry_export_mode must be 'include', 'skip', or 'error'")
 
     try:
         data["default_last_event_minutes"] = int(data["default_last_event_minutes"])
