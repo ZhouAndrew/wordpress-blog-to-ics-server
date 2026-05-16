@@ -35,12 +35,32 @@ def validate_wordpress_path(path: str) -> ValidationResult:
 
 
 def validate_output_dir(path: str) -> ValidationResult:
+    """Backward-compatible alias for writable directory validation."""
+    return validate_output_dir_writable(path)
+
+
+def validate_output_dir_readonly(path: str) -> ValidationResult:
+    p = Path(path)
+    if not p.exists():
+        return ValidationResult(False, "directory", "Directory is missing", str(p))
+    if not p.is_dir():
+        return ValidationResult(False, "directory", "Path exists but is not a directory", str(p))
+    if not os.access(p, os.W_OK):
+        return ValidationResult(False, "directory", "Directory is not writable", str(p))
+    return ValidationResult(True, "directory", "Directory exists and is writable", str(p))
+
+
+def validate_output_dir_writable(path: str) -> ValidationResult:
     p = Path(path)
     try:
         p.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         return ValidationResult(False, "directory", "Cannot create directory", str(exc))
-    return ValidationResult(True, "directory", "Directory is writable", str(p))
+    if not p.is_dir():
+        return ValidationResult(False, "directory", "Path exists but is not a directory", str(p))
+    if not os.access(p, os.W_OK):
+        return ValidationResult(False, "directory", "Directory is not writable", str(p))
+    return ValidationResult(True, "directory", "Directory exists and is writable", str(p))
 
 
 def validate_rest_credentials(base_url: str, username: str, app_password: str, verify_ssl: bool) -> ValidationResult:

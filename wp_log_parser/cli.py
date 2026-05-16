@@ -31,7 +31,8 @@ from .validators import (
     validate_caldav_config,
     validate_custom_parsing_patterns,
     validate_dependencies,
-    validate_output_dir,
+    validate_output_dir_readonly,
+    validate_output_dir_writable,
     validate_python_path,
     validate_rest_credentials,
     validate_wordpress_path,
@@ -123,9 +124,9 @@ def _print_validation(config, *, require_caldav: bool = False, include_caldav: b
     checks.extend(validate_dependencies())
     checks.append(validate_custom_parsing_patterns(config))
     checks.append(validate_python_path(config.python_path))
-    checks.append(validate_output_dir(config.output_dir))
-    checks.append(validate_output_dir(config.error_dir))
-    checks.append(validate_output_dir(config.logs_dir))
+    checks.append(validate_output_dir_readonly(config.output_dir))
+    checks.append(validate_output_dir_readonly(config.error_dir))
+    checks.append(validate_output_dir_readonly(config.logs_dir))
     if config.wordpress_mode == "wpcli":
         checks.append(validate_wp_cli(config.wp_cli_path))
         checks.append(validate_wordpress_path(config.wp_path))
@@ -235,7 +236,7 @@ def _select_post_interactively(config):
     return posts[idx-1]
 
 def _validate_update_today(config) -> bool:
-    output_check = validate_output_dir(config.output_dir)
+    output_check = validate_output_dir_readonly(config.output_dir)
     status = "[OK]" if output_check.ok else "[ERROR]"
     print(f"{status} {output_check.name}: {output_check.message}")
     if not output_check.ok:
@@ -727,6 +728,11 @@ def main(argv: list[str] | None = None) -> int:
         if _debug_enabled(args):
             _print_debug_header(args.command, args.config, config, {"days": args.days})
         try:
+            for path in (config.output_dir, config.error_dir, config.logs_dir):
+                dir_check = validate_output_dir_writable(path)
+                if not dir_check.ok:
+                    print(f"[ERROR] {dir_check.name}: {dir_check.message}")
+                    return 1
             result = publish_once(config, days=args.days, verbose=args.verbose)
             post_ids = [int(item["post_id"]) for item in result.get("items", []) if item.get("post_id") is not None]
             _write_snapshot_best_effort(

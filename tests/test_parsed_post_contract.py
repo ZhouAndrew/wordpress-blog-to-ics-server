@@ -153,6 +153,19 @@ def test_publish_once_uses_parsed_post_attributes(monkeypatch, tmp_path: Path) -
     assert Path(result["index_html"]).exists()
 
 
+def test_publish_once_creates_output_directory_when_missing(monkeypatch, tmp_path: Path) -> None:
+    output_dir = tmp_path / "missing-output"
+    config = AppConfig(output_dir=str(output_dir), timezone="UTC", save_ignored_blocks=False)
+
+    monkeypatch.setattr("wp_log_parser.service_mode.list_recent_post_ids", lambda _config, _days: [])
+
+    result = publish_once(config, days=1, verbose=False)
+
+    assert output_dir.exists() is True
+    assert output_dir.is_dir() is True
+    assert result["published_count"] == 0
+
+
 def test_export_ics_command_path_still_generates_ics(monkeypatch, tmp_path: Path, capsys) -> None:
     config_path = tmp_path / "config.json"
     entries_path = tmp_path / "entries.json"

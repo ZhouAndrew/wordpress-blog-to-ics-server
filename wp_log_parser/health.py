@@ -17,7 +17,7 @@ from .validators import (
     validate_caldav_config,
     validate_custom_parsing_patterns,
     validate_dependencies,
-    validate_output_dir,
+    validate_output_dir_readonly,
     validate_python_path,
     validate_rest_credentials,
     validate_wordpress_path,
@@ -59,7 +59,7 @@ def run_health_check(
         _write_health_files(config, report)
         return report
 
-    for c in [*validate_dependencies(), validate_python_path(config.python_path), validate_output_dir(config.output_dir), validate_output_dir(config.error_dir), validate_output_dir(config.logs_dir)]:
+    for c in [*validate_dependencies(), validate_python_path(config.python_path), validate_output_dir_readonly(config.output_dir), validate_output_dir_readonly(config.error_dir), validate_output_dir_readonly(config.logs_dir)]:
         report["environment"].append(_item("ok" if c.ok else "error", c.message, {"name": c.name}, fixable=not c.ok))
 
     if config.wordpress_mode == "wpcli":
