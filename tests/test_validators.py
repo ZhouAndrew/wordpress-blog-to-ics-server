@@ -1,4 +1,9 @@
-from wp_log_parser.validators import validate_caldav_config, validate_python_path, validate_wp_cli
+from wp_log_parser.validators import (
+    validate_caldav_config,
+    validate_output_dir_readonly,
+    validate_python_path,
+    validate_wp_cli,
+)
 
 
 def test_validate_python_path_passes_for_python3():
@@ -35,3 +40,11 @@ def test_validate_caldav_config_rejects_invalid_domain(tmp_path):
         required=True,
     )
     assert result.ok is False
+
+
+def test_validate_output_dir_readonly_reports_missing_without_creating(tmp_path):
+    missing = tmp_path / "does-not-exist"
+    result = validate_output_dir_readonly(str(missing))
+    assert result.ok is False
+    assert result.message == "Directory is missing"
+    assert missing.exists() is False
