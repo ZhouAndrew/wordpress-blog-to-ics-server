@@ -22,6 +22,17 @@ from .parser import parse_post_content
 from .source_metadata import attach_source_metadata
 
 
+def _entries_for_export(parsed, mode: str):
+    if mode == "include":
+        return parsed.entries
+    if mode == "skip":
+        return [entry for entry in parsed.entries if entry.status != "needs_review"]
+    blocked = [entry for entry in parsed.entries if entry.status == "needs_review"]
+    if blocked:
+        raise RuntimeError(f"Post {parsed.post_id or 'unknown'} has {len(blocked)} entries needing review.")
+    return parsed.entries
+
+
 class QuietHTTPRequestHandler(SimpleHTTPRequestHandler):
     def log_message(self, fmt: str, *args: Any) -> None:
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -39,12 +50,20 @@ def publish_once(config: AppConfig, days: int, verbose: bool = False) -> dict[st
         post_date = normalize_post_date(post.post_date)
         parsed = parse_post_content(post.post_content, post_date, config, verbose=verbose)
         attach_source_metadata(parsed, post)
+        if parsed.warnings and verbose:
+            for warn in parsed.warnings:
+                print(f"[WARN] post {post_id}: {warn.reason} - {warn.message}")
         if not parsed.entries:
             if verbose:
                 print(f"[WARN] Skipped post {post_id}: no valid timed entries")
             continue
 
-        out_path = write_post_ics(post, parsed.entries, config.output_dir, config.timezone)
+        export_entries = _entries_for_export(parsed, config.review_entry_export_mode)
+        if not export_entries:
+            if verbose:
+                print(f"[WARN] Skipped post {post_id}: all entries filtered by review_entry_export_mode={config.review_entry_export_mode}")
+            continue
+        out_path = write_post_ics(post, export_entries, config.output_dir, config.timezone)
         if verbose:
             print(f"[OK] Published post {post_id}: {out_path.name}")
 
@@ -60,8 +79,9 @@ def publish_once(config: AppConfig, days: int, verbose: bool = False) -> dict[st
                 "post_date": post.post_date,
                 "ics_file": out_path.name,
                 "ics_url": build_public_ics_url(config.ics_base_url, out_path.name),
-                "entry_count": len(parsed.entries),
+                "entry_count": len(export_entries),
                 "ignored_block_count": len(parsed.ignored_blocks),
+                "warning_count": len(parsed.warnings),
             }
         )
 
