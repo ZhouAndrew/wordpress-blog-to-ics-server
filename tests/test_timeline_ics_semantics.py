@@ -176,3 +176,23 @@ def test_ics_timezone_contract_converts_aware_datetimes_to_utc_z() -> None:
     assert "DTSTART:20260410T224500Z" in ics
     assert "DTEND:20260410T231000Z" in ics
     assert "TZID" not in ics
+
+
+def test_overlap_marks_entries_needs_review_by_default_policy() -> None:
+    entries = [
+        LogEntry(date="2026-04-11", start_time="18:00", end_time="18:23", summary="Dinner", raw="", status="needs_review"),
+        LogEntry(date="2026-04-11", start_time="18:10", end_time=None, summary="Call", raw="", status="needs_review"),
+    ]
+    timeline_entries, warnings = apply_timeline(entries, AppConfig(overlap_policy="needs_review"))
+    assert any(item.reason == "overlap" for item in warnings)
+    assert timeline_entries[0].status == "needs_review"
+
+
+def test_explicit_overlap_is_detected_under_warn_policy() -> None:
+    entries = [
+        LogEntry(date="2026-04-11", start_time="09:00", end_time="09:30", summary="A", raw="", status="needs_review"),
+        LogEntry(date="2026-04-11", start_time="09:20", end_time=None, summary="B", raw="", status="needs_review"),
+    ]
+    timeline_entries, warnings = apply_timeline(entries, AppConfig(overlap_policy="warn", auto_cross_midnight=False))
+    assert any(item.reason == "overlap" for item in warnings)
+    assert timeline_entries[0].status == "ready"

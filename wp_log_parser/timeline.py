@@ -44,15 +44,23 @@ def apply_timeline(entries: list[LogEntry], config: AppConfig) -> tuple[list[Log
             current.end_dt = _entry_end_datetime(current, current.start_dt)
 
         if current.end_dt and current.end_dt > nxt.start_dt:
-            warnings.append(
-                ParseWarning(
-                    index=i + 1,
-                    reason="overlap",
-                    message=(
-                        f"event #{i + 1} end_time ({current.end_time}) exceeds next start_time ({nxt.start_time})"
-                    ),
-                )
+            overlap_warning = ParseWarning(
+                index=i + 1,
+                reason="overlap",
+                message=(
+                    f"event #{i + 1} end_time ({current.end_time}) exceeds next start_time ({nxt.start_time})"
+                ),
             )
+            warnings.append(overlap_warning)
+            if config.overlap_policy == "needs_review":
+                current.status = "needs_review"
+                nxt.status = "needs_review"
+            elif config.overlap_policy == "error":
+                raise ValueError(overlap_warning.message)
+            else:
+                current.status = "ready"
+        else:
+            current.status = "ready"
 
         if current.end_dt and current.end_dt < current.start_dt:
             warnings.append(
@@ -64,7 +72,6 @@ def apply_timeline(entries: list[LogEntry], config: AppConfig) -> tuple[list[Log
             )
             current.end_dt = current.start_dt
             current.end_time = current.end_dt.strftime("%H:%M")
-        current.status = "ready"
 
     if entries:
         last = entries[-1]

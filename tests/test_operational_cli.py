@@ -67,3 +67,38 @@ def test_app_command_dispatch_tty(monkeypatch):
     monkeypatch.setattr(cli, "load_config", lambda _path: AppConfig())
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
     assert cli.main(["app", "--config", "./config.json"]) == 2
+
+
+def test_post_to_ics_surfaces_overlap_warning_and_blocks_on_error_mode(tmp_path, monkeypatch, capsys):
+    cfg_path = tmp_path / "config.json"
+    save_config(
+        AppConfig(
+            output_dir=str(tmp_path / "out"),
+            error_dir=str(tmp_path / "err"),
+            logs_dir=str(tmp_path / "logs"),
+            overlap_policy="needs_review",
+            review_entry_export_mode="error",
+        ),
+        str(cfg_path),
+    )
+    monkeypatch.setattr(cli, "fetch_post", lambda _c, _id: type("P", (), {"post_id": 7, "post_date": "2026-04-11", "post_content": "", "title": "T"})())
+    monkeypatch.setattr(
+        cli,
+        "parse_post_content",
+        lambda *_a, **_k: type(
+            "X",
+            (),
+            {
+                "entries": [type("E", (), {"status": "needs_review"})()],
+                "ignored_blocks": [],
+                "warnings": [type("W", (), {"reason": "overlap", "message": "overlap found"})()],
+            },
+        )(),
+    )
+    monkeypatch.setattr(cli, "attach_source_metadata", lambda *_a, **_k: None)
+    monkeypatch.setattr(cli, "_print_validation", lambda *_a, **_k: True)
+    rc = cli.main(["post-to-ics", "--config", str(cfg_path), "--post-id", "7"])
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "[WARN] Timeline warnings: 1" in out
+    assert "overlap found" in out

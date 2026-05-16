@@ -162,6 +162,8 @@ You can also start from `example.config.json`.
 - `default_last_event_minutes`: fallback duration for final event
 - `save_ignored_blocks`: write ignored block diagnostics
 - `custom_parsing_patterns`: optional custom regex parsing rules
+- `overlap_policy`: handling for overlapping events (`warn`, `needs_review`, `error`)
+- `review_entry_export_mode`: exporter handling for `needs_review` entries (`include`, `skip`, `error`)
 - `caldav_url`: CalDAV collection URL (for `sync-caldav`)
 - `caldav_username`, `caldav_password`: CalDAV credentials
 - `caldav_uid_domain`: UID suffix domain for event resources
