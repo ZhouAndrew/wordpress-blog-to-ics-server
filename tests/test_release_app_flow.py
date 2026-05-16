@@ -103,13 +103,54 @@ def test_update_today_ics_calls_correct_signature(monkeypatch, capsys):
     monkeypatch.setattr(cli, "run_health_check", lambda *a, **k: {"wordpress_runtime": [], "parser_runtime": [], "ics_runtime": []})
     called = {}
     monkeypatch.setattr(cli, "generate_today_ics", lambda output_dir, timezone, preferred_post_id=None, mode="copy": called.update({"output_dir": output_dir, "timezone": timezone, "preferred_post_id": preferred_post_id, "mode": mode}) or "/tmp/today.ics")
-    inputs = iter(["n", "11", "0"])
+    monkeypatch.setattr(cli, "today_date_str", lambda _tz: "2026-05-05")
+    monkeypatch.setattr(cli, "find_today_ics_candidates", lambda *_args, **_kwargs: [Path("2026-05-05_post_100_latest.ics")])
+    inputs = iter(["11", "0"])
     monkeypatch.setattr("builtins.input", lambda _p="": next(inputs))
     assert cli.main(["app", "--config", "./config.json"]) == 0
     assert called["output_dir"] == cfg.output_dir
     assert called["timezone"] == cfg.timezone
     assert called["mode"] == "copy"
     assert "Updated today.ics" in capsys.readouterr().out
+
+
+def test_update_today_ics_app_flow_allows_candidate_disambiguation(monkeypatch, capsys):
+    cfg = AppConfig()
+    monkeypatch.setattr(cli, "config_exists", lambda _path: True)
+    monkeypatch.setattr(cli, "load_config", lambda _path: cfg)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr(cli, "run_health_check", lambda *a, **k: {"wordpress_runtime": [], "parser_runtime": [], "ics_runtime": []})
+    monkeypatch.setattr(cli, "today_date_str", lambda _tz: "2026-05-05")
+    monkeypatch.setattr(
+        cli,
+        "find_today_ics_candidates",
+        lambda _output_dir, _today: [
+            Path("2026-05-05_post_100_latest.ics"),
+            Path("2026-05-05_post_99_older.ics"),
+        ],
+    )
+    monkeypatch.setattr(
+        cli,
+        "list_posts",
+        lambda _config: [
+            {"id": 100, "modified_gmt": "2026-05-05 11:00:00", "date": "2026-05-05 10:30:00"},
+            {"id": 99, "modified_gmt": "2026-05-05 10:00:00", "date": "2026-05-05 09:30:00"},
+        ],
+    )
+    called = {}
+    monkeypatch.setattr(
+        cli,
+        "generate_today_ics",
+        lambda output_dir, timezone, preferred_post_id=None, mode="copy": called.update(
+            {"output_dir": output_dir, "timezone": timezone, "preferred_post_id": preferred_post_id, "mode": mode}
+        )
+        or "/tmp/today.ics",
+    )
+    inputs = iter(["11", "2", "0"])
+    monkeypatch.setattr("builtins.input", lambda _p="": next(inputs))
+    assert cli.main(["app", "--config", "./config.json"]) == 0
+    assert called["preferred_post_id"] == 99
+    assert "Multiple today.ics source candidates found" in capsys.readouterr().out
 
 
 def test_local_publish_menu_calls_publish_once_with_days(monkeypatch):
