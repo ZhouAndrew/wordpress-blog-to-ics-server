@@ -552,6 +552,10 @@ def main(argv: list[str] | None = None) -> int:
         if not _validate_update_today(config):
             print("Critical validation errors found. Aborting execution.")
             return 1
+    elif args.command == "publish-ics":
+        # publish-ics performs writable preflight later and must allow
+        # first-run directory creation in write flows.
+        pass
     else:
         if args.command == "sync-caldav":
             ok = _print_validation(config, require_caldav=True)
