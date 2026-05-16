@@ -196,3 +196,28 @@ def test_explicit_overlap_is_detected_under_warn_policy() -> None:
     timeline_entries, warnings = apply_timeline(entries, AppConfig(overlap_policy="warn", auto_cross_midnight=False))
     assert any(item.reason == "overlap" for item in warnings)
     assert timeline_entries[0].status == "ready"
+
+
+def test_overlap_needs_review_is_sticky_for_middle_entry() -> None:
+    entries = [
+        LogEntry(date="2026-04-11", start_time="09:00", end_time="09:30", summary="A", raw="", status="needs_review"),
+        LogEntry(date="2026-04-11", start_time="09:20", end_time="09:40", summary="B", raw="", status="needs_review"),
+        LogEntry(date="2026-04-11", start_time="10:00", end_time=None, summary="C", raw="", status="needs_review"),
+    ]
+
+    timeline_entries, warnings = apply_timeline(entries, AppConfig(overlap_policy="needs_review"))
+
+    assert any(item.reason == "overlap" for item in warnings)
+    assert timeline_entries[1].status == "needs_review"
+
+
+def test_overlap_needs_review_is_sticky_for_terminal_entry() -> None:
+    entries = [
+        LogEntry(date="2026-04-11", start_time="09:00", end_time="09:30", summary="A", raw="", status="needs_review"),
+        LogEntry(date="2026-04-11", start_time="09:20", end_time="09:40", summary="B", raw="", status="needs_review"),
+    ]
+
+    timeline_entries, warnings = apply_timeline(entries, AppConfig(overlap_policy="needs_review"))
+
+    assert any(item.reason == "overlap" for item in warnings)
+    assert timeline_entries[1].status == "needs_review"
