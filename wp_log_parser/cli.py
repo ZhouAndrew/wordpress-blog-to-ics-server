@@ -801,15 +801,19 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
     if args.command == "run-ics-service":
-        run_service_loop(
-            config=config,
-            days=args.days,
-            interval_seconds=args.interval,
-            host=args.host,
-            port=args.port,
-            verbose=args.verbose,
-        )
-        return 0
+        try:
+            run_service_loop(
+                config=config,
+                days=args.days,
+                interval_seconds=args.interval,
+                host=args.host,
+                port=args.port,
+                verbose=args.verbose,
+            )
+            return 0
+        except KeyboardInterrupt:
+            print("[INFO] Service interrupted. Shutting down cleanly.")
+            return 0
 
     if args.command == "sync-caldav":
         if args.dry_run and args.apply:

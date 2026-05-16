@@ -205,6 +205,22 @@ def test_successful_publish_ics_does_not_fail_if_snapshot_write_fails(monkeypatc
     assert "[WARN] Failed to write run snapshot: snapshot failed" in out
 
 
+def test_run_ics_service_keyboard_interrupt_is_clean(monkeypatch, capsys) -> None:
+    config = AppConfig(error_dir="./errors")
+
+    monkeypatch.setattr(cli, "config_exists", lambda _path: True)
+    monkeypatch.setattr(cli, "load_config", lambda _path: config)
+    monkeypatch.setattr(cli, "_print_validation", lambda _config, require_caldav=False: True)
+    monkeypatch.setattr(cli, "run_service_loop", lambda *_args, **_kwargs: (_ for _ in ()).throw(KeyboardInterrupt()))
+
+    code = cli.main(["run-ics-service", "--config", "./config.json", "--days", "7"])
+    out = capsys.readouterr().out
+
+    assert code == 0
+    assert "[INFO] Service interrupted. Shutting down cleanly." in out
+    assert "Traceback" not in out
+
+
 def test_failed_sync_still_returns_original_failure_when_snapshot_write_fails(monkeypatch, capsys) -> None:
     config = AppConfig(error_dir="./errors")
 
