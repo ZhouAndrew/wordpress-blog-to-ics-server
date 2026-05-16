@@ -7,10 +7,43 @@ from zoneinfo import ZoneInfo
 
 
 def escape_ics_text(value: str) -> str:
+    value = value.replace("\r\n", "\n").replace("\r", "\n")
+    value = "".join(ch for ch in value if ch == "\n" or ord(ch) >= 0x20)
     value = value.replace("\\", "\\\\")
     value = value.replace(";", "\\;").replace(",", "\\,")
     value = value.replace("\n", "\\n")
     return value
+
+
+def fold_ics_content_line(line: str, limit: int = 75) -> list[str]:
+    encoded = line.encode("utf-8")
+    if len(encoded) <= limit:
+        return [line]
+
+    chunks: list[bytes] = []
+    prefix = b""
+    while encoded:
+        room = limit - len(prefix)
+        split = min(len(encoded), room)
+        while split > 0:
+            try:
+                candidate = encoded[:split].decode("utf-8")
+                break
+            except UnicodeDecodeError:
+                split -= 1
+        if split == 0:
+            raise ValueError("Unable to fold ICS line without splitting UTF-8 sequence")
+        chunks.append(prefix + candidate.encode("utf-8"))
+        encoded = encoded[split:]
+        prefix = b" "
+    return [chunk.decode("utf-8") for chunk in chunks]
+
+
+def serialize_ics_lines(lines: list[str]) -> str:
+    folded: list[str] = []
+    for line in lines:
+        folded.extend(fold_ics_content_line(line))
+    return "\r\n".join(folded) + "\r\n"
 
 
 def _entry_value(entry: Any, key: str, default: Any = None) -> Any:
@@ -86,7 +119,7 @@ def generate_single_event_ics(
         lines.append(f"DTEND:{format_ics_utc_datetime(end_dt, timezone)}")
     lines.append(f"SUMMARY:{escape_ics_text(summary)}")
     lines.extend(["END:VEVENT", "END:VCALENDAR"])
-    return "\r\n".join(lines) + "\r\n"
+    return serialize_ics_lines(lines)
 
 def generate_ics(entries: list[Any], timezone: str = "UTC") -> str:
     dtstamp = datetime.now(dt_timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -123,4 +156,4 @@ def generate_ics(entries: list[Any], timezone: str = "UTC") -> str:
         lines.append("END:VEVENT")
 
     lines.append("END:VCALENDAR")
-    return "\r\n".join(lines) + "\r\n"
+    return serialize_ics_lines(lines)
