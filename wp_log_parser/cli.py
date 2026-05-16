@@ -3,13 +3,20 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 import traceback
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from .aliases import find_today_ics_candidates, generate_today_ics, select_today_ics, today_date_str
+from .aliases import (
+    find_today_ics_candidates,
+    generate_today_ics,
+    select_today_ics,
+    select_today_ics_from_post_metadata,
+    today_date_str,
+)
 from .config import config_exists, create_default_config, load_config, save_config
 from .exceptions import ConfigError
 from .debug_report import sanitize_config, write_recent_run_snapshot
@@ -518,7 +525,29 @@ def main(argv: list[str] | None = None) -> int:
                     print(json.dumps(result, ensure_ascii=False, indent=2))
                 elif choice == "11":
                     try:
-                        target = generate_today_ics(config.output_dir, config.timezone, preferred_post_id=None, mode="copy")
+                        preferred_post_id = None
+                        today = today_date_str(config.timezone)
+                        candidates = find_today_ics_candidates(Path(config.output_dir), today)
+                        if len(candidates) > 1:
+                            metadata_choice = select_today_ics_from_post_metadata(candidates, list_posts(config))
+                            if metadata_choice is not None:
+                                match = re.match(r"^\d{4}-\d{2}-\d{2}_post_(\d+)_.*\.ics$", metadata_choice.name)
+                                if match:
+                                    preferred_post_id = int(match.group(1))
+                            print("Multiple today.ics source candidates found:")
+                            for idx, candidate in enumerate(candidates, 1):
+                                print(f"  {idx}) {candidate.name}")
+                            if preferred_post_id is not None:
+                                print(f"Suggested by post metadata: post ID {preferred_post_id}")
+                            selection = input("Choose candidate number (Enter for suggested/latest): ").strip()
+                            if selection.isdigit():
+                                selected_index = int(selection) - 1
+                                if 0 <= selected_index < len(candidates):
+                                    selected_path = candidates[selected_index]
+                                    selected_match = re.match(r"^\d{4}-\d{2}-\d{2}_post_(\d+)_.*\.ics$", selected_path.name)
+                                    if selected_match:
+                                        preferred_post_id = int(selected_match.group(1))
+                        target = generate_today_ics(config.output_dir, config.timezone, preferred_post_id=preferred_post_id, mode="copy")
                         print(f"Updated today.ics: {target}")
                     except FileNotFoundError:
                         print("No ICS file for today exists yet. Generate local ICS files first.")
