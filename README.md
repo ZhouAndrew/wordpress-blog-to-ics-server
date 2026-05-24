@@ -72,6 +72,25 @@ Typical use cases:
 - Python **3.10+** (3.11 recommended)
 - `pip`
 
+### Continuous Integration (CI)
+
+GitHub Actions CI runs automatically for:
+
+- every `pull_request`
+- every `push` to the `main` branch
+
+CI workflow checks:
+
+1. Set up Python 3.11
+2. Install dependencies from `requirements.txt`
+3. Run `pytest -vv`
+
+Behavior and expectations:
+
+- CI uses pip dependency caching (based on `requirements.txt`) to keep runtime reasonable.
+- Any regression test failure causes CI to fail the workflow.
+- `pytest -vv` provides detailed test output so logs are clear in Actions.
+
 ### For `wpcli` mode
 
 - `wp-cli` installed and available on PATH (or configured via `wp_cli_path`)
