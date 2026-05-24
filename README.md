@@ -134,9 +134,15 @@ pip install requests pytest
 
 ---
 
-## Configuration (`config.json`)
+## Configuration (local `config.json`, untracked)
 
-Create config interactively (recommended):
+Create a local runtime config (recommended):
+
+```bash
+cp example.config.json config.json
+```
+
+Or create it interactively:
 
 ```bash
 python -m wp_log_parser init-config --wizard --config ./config.json
@@ -446,3 +452,14 @@ For a step-by-step setup and first run walkthrough, see:
 ## License
 
 MIT
+
+
+## Credential exposure response
+
+If any credential is accidentally committed, shared, or exposed in logs/artifacts, rotate it immediately before continuing work:
+
+- WordPress `app_password`
+- CalDAV password/token
+- Any API token or local secret used by this project
+
+After rotation, update your local `config.json`, re-run validation, and confirm old credentials no longer work.

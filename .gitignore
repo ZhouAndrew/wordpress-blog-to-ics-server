@@ -210,3 +210,19 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Local runtime config and secrets
+config.json
+*.local.json
+secrets.json
+*.secrets.json
+*.token
+*.tokens
+
+# Generated runtime artifacts
+output/
+published_ics/
+index.json
+index.html
+today.ics
+debug_report.json
