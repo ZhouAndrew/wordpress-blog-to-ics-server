@@ -14,23 +14,53 @@ This project is **not public-alpha ready yet**. It remains in internal validatio
 
 ## Before v0.1.0-alpha
 
-- [ ] fresh clone
-- [ ] install script
-- [ ] run script
-- [ ] setup wizard
-- [ ] health summary
-- [ ] recent post list
-- [ ] timeline preview
-- [ ] local ICS generation
-- [ ] today.ics update
-- [ ] local service subscription
-- [ ] CalDAV setup
-- [ ] CalDAV doctor
-- [ ] dry-run sync
-- [ ] real sync
-- [ ] second sync idempotency
-- [ ] Ctrl+C handling
-- [ ] secret redaction
+- [ ] [CI Smoke] CLI help and usage guardrails
+- [ ] [CI Smoke] `post-to-ics` command dispatch (stubbed, no WordPress required)
+- [ ] [CI Smoke] `publish-ics` command dispatch (stubbed, no WordPress required)
+- [ ] [CI Smoke] `update-today-ics` command dispatch (stubbed, no WordPress required)
+- [ ] [CI Smoke] `run-ics-service` command dispatch (stubbed, no WordPress required)
+- [ ] [Local Manual] fresh clone
+- [ ] [Local Manual] install script
+- [ ] [Local Manual] run script
+- [ ] [Local Manual] setup wizard
+- [ ] [Local Manual] health summary
+- [ ] [Local Manual] recent post list
+- [ ] [Local Manual] timeline preview
+- [ ] [Local Manual] local ICS generation
+- [ ] [Local Manual] today.ics update
+- [ ] [Local Manual] local service subscription
+- [ ] [Local Manual] CalDAV setup
+- [ ] [Local Manual] CalDAV doctor
+- [ ] [Local Manual] dry-run sync
+- [ ] [Local Manual] real sync
+- [ ] [Local Manual] second sync idempotency
+- [ ] [Local Manual] Ctrl+C handling
+- [ ] [Local Manual] secret redaction
+
+## Fresh-clone checklist
+
+### Automated (CI-covered smoke checks)
+
+These checks are designed to run in CI without local secrets, without a live WordPress install, and without CalDAV credentials.
+
+- Top-level CLI help works: `python -m wp_log_parser --help`
+- Command help pages work:
+  - `python -m wp_log_parser post-to-ics --help`
+  - `python -m wp_log_parser publish-ics --help`
+  - `python -m wp_log_parser update-today-ics --help`
+  - `python -m wp_log_parser run-ics-service --help`
+- Required usage/guardrail paths fail explicitly (for example missing `--post-id`).
+- Key CLI command entry points dispatch correctly in smoke mode using test stubs (no WordPress runtime dependency).
+
+### Manual (local environment validation)
+
+These checks validate real integration behavior and require your local runtime and configuration.
+
+- Install and launch workflow (`./install.sh`, `./run.sh`)
+- Wizard/configuration flow
+- Real WordPress fetch/parse/export validation
+- `publish-ics`, `update-today-ics`, and service mode output verification
+- Optional CalDAV setup + dry-run/real sync validation
 
 ## Project Overview
 
