@@ -60,7 +60,8 @@ def apply_timeline(entries: list[LogEntry], config: AppConfig) -> tuple[list[Log
             else:
                 current.status = "ready"
         else:
-            current.status = "ready"
+            if not (config.overlap_policy == "needs_review" and current.status == "needs_review"):
+                current.status = "ready"
 
         if current.end_dt and current.end_dt < current.start_dt:
             warnings.append(
@@ -79,14 +80,16 @@ def apply_timeline(entries: list[LogEntry], config: AppConfig) -> tuple[list[Log
             if config.default_last_event_minutes > 0:
                 last.end_dt = last.start_dt + timedelta(minutes=config.default_last_event_minutes)
                 last.end_time = last.end_dt.strftime("%H:%M")
-                last.status = "ready"
+                if not (config.overlap_policy == "needs_review" and last.status == "needs_review"):
+                    last.status = "ready"
             else:
                 last.end_dt = None
                 last.status = "needs_review"
         else:
             if last.end_dt is None:
                 last.end_dt = _entry_end_datetime(last, last.start_dt)
-            last.status = "ready"
+            if not (config.overlap_policy == "needs_review" and last.status == "needs_review"):
+                last.status = "ready"
 
         if last.end_dt is not None and last.end_dt < last.start_dt:
             warnings.append(
