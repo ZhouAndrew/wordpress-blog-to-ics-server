@@ -19,11 +19,12 @@ pip install requests pytest
 
 ---
 
-## 2) Create your config
+## 2) Create your local config (untracked)
 
-Run the setup wizard:
+Start from the template, then optionally run the wizard:
 
 ```bash
+cp example.config.json config.json
 python -m wp_log_parser init-config --wizard --config ./config.json
 ```
 
@@ -167,3 +168,10 @@ python -m wp_log_parser post-to-ics --config ./config.json --post-id 10213
 python -m wp_log_parser publish-ics --config ./config.json --days 7
 python -m wp_log_parser update-today-ics --config ./config.json
 ```
+
+
+---
+
+## Credential exposure response
+
+If credentials are leaked (repo commit, terminal logs, screenshots, or chat), rotate passwords/tokens immediately and do not reuse compromised values. Then update local `config.json` and re-run `validate-config`.
