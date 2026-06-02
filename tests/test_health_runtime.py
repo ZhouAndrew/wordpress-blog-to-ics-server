@@ -17,27 +17,27 @@ def test_item_details_is_always_dict():
 
 def test_wordpress_list_failure_returns_error(monkeypatch):
     cfg = AppConfig()
-    monkeypatch.setattr("wp_log_parser.health.list_posts", lambda c: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr("wp_log_parser.health.service.list_posts", lambda c: (_ for _ in ()).throw(RuntimeError("boom")))
     report = run_health_check(cfg, full=True)
     assert any(i["status"] == "error" for i in report["wordpress_runtime"])
 
 
 def test_latest_post_selected(monkeypatch):
     cfg = AppConfig()
-    monkeypatch.setattr("wp_log_parser.health.list_posts", lambda c: [{"id": 1, "date": "2026-01-01"}, {"id": 2, "date": "2026-01-02"}])
+    monkeypatch.setattr("wp_log_parser.health.service.list_posts", lambda c: [{"id": 1, "date": "2026-01-01"}, {"id": 2, "date": "2026-01-02"}])
     seen = {"id": None}
-    monkeypatch.setattr("wp_log_parser.health.fetch_post", lambda c, pid: seen.__setitem__("id", pid) or _mk_post(pid, "2026-01-02"))
-    monkeypatch.setattr("wp_log_parser.health.parse_post_content", lambda *a, **k: SimpleNamespace(entries=[SimpleNamespace(to_dict=lambda: {"start_dt": "x"})], ignored_blocks=[], warnings=[]))
-    monkeypatch.setattr("wp_log_parser.health.generate_ics", lambda *a, **k: "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n")
+    monkeypatch.setattr("wp_log_parser.health.service.fetch_post", lambda c, pid: seen.__setitem__("id", pid) or _mk_post(pid, "2026-01-02"))
+    monkeypatch.setattr("wp_log_parser.health.service.parse_post", lambda *a, **k: SimpleNamespace(entries=[SimpleNamespace(to_dict=lambda: {"start_dt": "x"})], ignored_blocks=[], warnings=[]))
+    monkeypatch.setattr("wp_log_parser.health.service.export_ics_from_entries", lambda *a, **k: "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n")
     run_health_check(cfg, full=True)
     assert seen["id"] == 2
 
 
 def test_zero_entries_parser_warning_and_ics_warning(monkeypatch):
     cfg = AppConfig()
-    monkeypatch.setattr("wp_log_parser.health.list_posts", lambda c: [{"id": 1, "date": "2026-01-01"}])
-    monkeypatch.setattr("wp_log_parser.health.fetch_post", lambda c, pid: _mk_post(pid))
-    monkeypatch.setattr("wp_log_parser.health.parse_post_content", lambda *a, **k: SimpleNamespace(entries=[], ignored_blocks=[], warnings=[]))
+    monkeypatch.setattr("wp_log_parser.health.service.list_posts", lambda c: [{"id": 1, "date": "2026-01-01"}])
+    monkeypatch.setattr("wp_log_parser.health.service.fetch_post", lambda c, pid: _mk_post(pid))
+    monkeypatch.setattr("wp_log_parser.health.service.parse_post", lambda *a, **k: SimpleNamespace(entries=[], ignored_blocks=[], warnings=[]))
     report = run_health_check(cfg, full=True)
     assert report["parser_runtime"][0]["status"] == "warning"
     assert report["ics_runtime"][0]["status"] == "warning"

@@ -143,7 +143,7 @@ def test_successful_run_today_does_not_fail_if_snapshot_write_fails(monkeypatch,
     monkeypatch.setattr(cli, "load_config", lambda _path: config)
     monkeypatch.setattr(cli, "_print_validation", lambda _config, require_caldav=False: True)
     monkeypatch.setattr(
-        cli,
+        cli.service,
         "run_today_pipeline",
         lambda _config: {"post_id": 10, "entries": [{"start_time": "07:45"}], "ignored_blocks": [], "ics_preview": "BEGIN:VCALENDAR"},
     )
@@ -159,23 +159,24 @@ def test_successful_run_today_does_not_fail_if_snapshot_write_fails(monkeypatch,
 def test_successful_post_to_ics_does_not_fail_if_snapshot_write_fails(monkeypatch, capsys, tmp_path) -> None:
     config = AppConfig(error_dir="./errors", output_dir=str(tmp_path))
 
-    class _Post:
-        post_id = 10
-        title = "Daily"
-        post_date = "2026-04-01 00:00:00"
-        post_content = "<p>07:45 Breakfast</p>"
-
-    class _Parsed:
-        entries = [object()]
-        ignored_blocks = []
-
     monkeypatch.setattr(cli, "config_exists", lambda _path: True)
     monkeypatch.setattr(cli, "load_config", lambda _path: config)
     monkeypatch.setattr(cli, "_print_validation", lambda _config, require_caldav=False: True)
-    monkeypatch.setattr(cli, "fetch_post", lambda _config, _post_id: _Post())
-    monkeypatch.setattr(cli, "normalize_post_date", lambda value: value)
-    monkeypatch.setattr(cli, "parse_post_content", lambda *_args, **_kwargs: _Parsed())
-    monkeypatch.setattr(cli, "write_post_ics", lambda *_args, **_kwargs: tmp_path / "out.ics")
+    monkeypatch.setattr(
+        cli.service,
+        "post_to_ics",
+        lambda *_args, **_kwargs: {
+            "post_id": 10,
+            "title": "Daily",
+            "post_date": "2026-04-01 00:00:00",
+            "output_file": str(tmp_path / "out.ics"),
+            "entry_count": 1,
+            "ignored_block_count": 0,
+            "warning_count": 0,
+            "warnings": [],
+            "parsed_entry_count": 1,
+        },
+    )
     monkeypatch.setattr(cli, "write_recent_run_snapshot", lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("snapshot failed")))
 
     code = cli.main(["post-to-ics", "--config", "./config.json", "--post-id", "10"])
@@ -192,8 +193,8 @@ def test_successful_publish_ics_does_not_fail_if_snapshot_write_fails(monkeypatc
     monkeypatch.setattr(cli, "load_config", lambda _path: config)
     monkeypatch.setattr(cli, "_print_validation", lambda _config, require_caldav=False: True)
     monkeypatch.setattr(
-        cli,
-        "publish_once",
+        cli.service,
+        "publish_ics",
         lambda *_args, **_kwargs: {"published_count": 1, "items": [{"post_id": 10}], "index_json": "./output/index.json"},
     )
     monkeypatch.setattr(cli, "write_recent_run_snapshot", lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("snapshot failed")))
@@ -211,7 +212,7 @@ def test_run_ics_service_keyboard_interrupt_is_clean(monkeypatch, capsys) -> Non
     monkeypatch.setattr(cli, "config_exists", lambda _path: True)
     monkeypatch.setattr(cli, "load_config", lambda _path: config)
     monkeypatch.setattr(cli, "_print_validation", lambda _config, require_caldav=False: True)
-    monkeypatch.setattr(cli, "run_service_loop", lambda *_args, **_kwargs: (_ for _ in ()).throw(KeyboardInterrupt()))
+    monkeypatch.setattr(cli.service, "run_ics_service", lambda *_args, **_kwargs: (_ for _ in ()).throw(KeyboardInterrupt()))
 
     code = cli.main(["run-ics-service", "--config", "./config.json", "--days", "7"])
     out = capsys.readouterr().out

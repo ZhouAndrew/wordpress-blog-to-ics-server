@@ -18,7 +18,7 @@ def test_parse_post_uses_fetched_post_date(monkeypatch, tmp_path, capsys) -> Non
     monkeypatch.setattr("wp_log_parser.cli.load_config", lambda _path: AppConfig())
     monkeypatch.setattr("wp_log_parser.cli._print_validation", lambda _config: True)
     monkeypatch.setattr(
-        "wp_log_parser.cli.fetch_post",
+        "wp_log_parser.service.fetch_post",
         lambda _config, _post_id: PostData(
             post_id=321,
             title="Log",
@@ -32,7 +32,7 @@ def test_parse_post_uses_fetched_post_date(monkeypatch, tmp_path, capsys) -> Non
         captured["post_date"] = post_date
         return ParsedPost(post_date=post_date)
 
-    monkeypatch.setattr("wp_log_parser.cli.parse_post_content", fake_parse_post_content)
+    monkeypatch.setattr("wp_log_parser.service.parse_post_content", fake_parse_post_content)
 
     exit_code = cli.main(["parse-post", "--config", str(config_path), "--post-id", "321"])
     output = capsys.readouterr().out
@@ -52,7 +52,7 @@ def test_post_to_ics_passes_timeline_entries_to_writer(monkeypatch, tmp_path) ->
     monkeypatch.setattr("wp_log_parser.cli.load_config", lambda _path: AppConfig(output_dir=str(tmp_path), timezone="UTC"))
     monkeypatch.setattr("wp_log_parser.cli._print_validation", lambda _config: True)
     monkeypatch.setattr(
-        "wp_log_parser.cli.fetch_post",
+        "wp_log_parser.service.fetch_post",
         lambda _config, _post_id: PostData(
             post_id=111,
             title="Log",
@@ -77,14 +77,14 @@ def test_post_to_ics_passes_timeline_entries_to_writer(monkeypatch, tmp_path) ->
             end_dt=datetime(2026, 4, 11, 8, 0),
         )
     ]
-    monkeypatch.setattr("wp_log_parser.cli.parse_post_content", lambda *_args, **_kwargs: parsed)
+    monkeypatch.setattr("wp_log_parser.service.parse_post_content", lambda *_args, **_kwargs: parsed)
 
     def fake_write_post_ics(_post, entries, _output_dir, _timezone):
         captured["entries"] = entries
         out_file.write_text("BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n", encoding="utf-8")
         return out_file
 
-    monkeypatch.setattr("wp_log_parser.cli.write_post_ics", fake_write_post_ics)
+    monkeypatch.setattr("wp_log_parser.service.write_post_ics", fake_write_post_ics)
 
     exit_code = cli.main(["post-to-ics", "--config", str(config_path), "--post-id", "111"])
 

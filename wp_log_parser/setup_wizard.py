@@ -17,6 +17,9 @@ from .validators import (
     validate_wp_cli,
 )
 
+# Backward-compatible alias for older tests/imports; writable validation is the wizard contract.
+validate_output_dir = validate_output_dir_writable
+
 
 def mask_secret(value: str) -> str:
     if not value:
@@ -36,6 +39,14 @@ def prompt_text(label: str, explanation: str, default: str | None = None) -> str
         if default is not None:
             return default
         print("Please enter a value.")
+
+
+def prompt_required_text(label: str, explanation: str, default: str | None = None) -> str:
+    while True:
+        value = prompt_text(label, explanation, default)
+        if value.strip():
+            return value
+        print("This value is required for the selected mode; leave setup without saving if it is not available yet.")
 
 
 def prompt_yes_no(label: str, explanation: str, default: bool = True) -> bool:
@@ -165,12 +176,16 @@ def run_setup_wizard(config_path: str) -> AppConfig:
         cfg.wp_cli_path = prompt_executable("2) wp command", "Path or command name for wp-cli.", cfg.wp_cli_path)
         cfg.wp_path = prompt_existing_path("WordPress path", "Path to WordPress installation.", cfg.wp_path)
     else:
-        cfg.base_url = prompt_text("2) WordPress base URL", "Example: https://example.com", cfg.base_url)
-        cfg.username = prompt_text("Username", "WordPress username for REST API.", cfg.username)
-        pwd_default = "" if not cfg.app_password else "(hidden default)"
-        print(f"\nApplication password\nWordPress application password. [default: {pwd_default}]")
-        pwd_input = getpass.getpass("> ")
-        cfg.app_password = pwd_input if pwd_input else cfg.app_password
+        cfg.base_url = prompt_required_text("2) WordPress base URL", "Example: https://example.com", cfg.base_url)
+        cfg.username = prompt_required_text("Username", "WordPress username for REST API.", cfg.username)
+        while True:
+            pwd_default = "" if not cfg.app_password else "(hidden default)"
+            print(f"\nApplication password\nWordPress application password. [default: {pwd_default}]")
+            pwd_input = getpass.getpass("> ")
+            cfg.app_password = pwd_input if pwd_input else cfg.app_password
+            if cfg.app_password.strip():
+                break
+            print("Application password is required for REST mode; no placeholder secret will be written.")
         cfg.verify_ssl = prompt_yes_no("Verify SSL", "Verify TLS certificate for REST calls.", cfg.verify_ssl)
 
     cfg.python_path = prompt_executable("3) Python path", "Python executable to use.", cfg.python_path)
@@ -214,15 +229,24 @@ def run_setup_wizard(config_path: str) -> AppConfig:
 
     use_caldav = prompt_yes_no("10) Use CalDAV sync", "Configure CalDAV upload now?", bool(cfg.caldav_url))
     if use_caldav:
-        cfg.caldav_url = prompt_text("CalDAV URL", "Calendar collection URL for PUT/DELETE operations.", cfg.caldav_url)
-        cfg.caldav_username = prompt_text("CalDAV username", "Username for CalDAV authentication.", cfg.caldav_username)
-        caldav_pwd_default = "" if not cfg.caldav_password else "(hidden default)"
-        print(f"\nCalDAV password\nPassword for CalDAV authentication. [default: {caldav_pwd_default}]")
-        caldav_pwd_input = getpass.getpass("> ")
-        cfg.caldav_password = caldav_pwd_input if caldav_pwd_input else cfg.caldav_password
-        cfg.caldav_uid_domain = prompt_text("CalDAV UID domain", "Domain used when generating deterministic event UIDs.", cfg.caldav_uid_domain)
+        cfg.caldav_url = prompt_required_text("CalDAV URL", "Calendar collection URL for PUT/DELETE operations.", cfg.caldav_url)
+        cfg.caldav_username = prompt_required_text("CalDAV username", "Username for CalDAV authentication.", cfg.caldav_username)
+        while True:
+            caldav_pwd_default = "" if not cfg.caldav_password else "(hidden default)"
+            print(f"\nCalDAV password\nPassword for CalDAV authentication. [default: {caldav_pwd_default}]")
+            caldav_pwd_input = getpass.getpass("> ")
+            cfg.caldav_password = caldav_pwd_input if caldav_pwd_input else cfg.caldav_password
+            if cfg.caldav_password.strip():
+                break
+            print("CalDAV password is required when CalDAV sync is enabled; no placeholder secret will be written.")
+        cfg.caldav_uid_domain = prompt_required_text("CalDAV UID domain", "Domain used when generating deterministic event UIDs.", cfg.caldav_uid_domain)
         cfg.caldav_deletion_mode = prompt_choice("CalDAV deletion mode", "Delete removed events or cancel them in place.", ["delete", "cancel"], cfg.caldav_deletion_mode)
-        cfg.caldav_index_path = prompt_text("CalDAV index path", "Where CalDAV sync state should be stored.", cfg.caldav_index_path)
+        cfg.caldav_index_path = prompt_required_text("CalDAV index path", "Where CalDAV sync state should be stored.", cfg.caldav_index_path)
+    else:
+        cfg.caldav_url = ""
+        cfg.caldav_username = ""
+        cfg.caldav_password = ""
+        print("CalDAV sync not configured. The config will validate for local ICS commands; sync-caldav will require credentials later.")
 
     print("\n11) Environment validation")
     results = []

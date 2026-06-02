@@ -47,7 +47,7 @@ def test_post_to_ics_command_writes_source_property(monkeypatch, tmp_path: Path)
     monkeypatch.setattr("wp_log_parser.cli.config_exists", lambda _path: True)
     monkeypatch.setattr("wp_log_parser.cli.load_config", lambda _path: config)
     monkeypatch.setattr("wp_log_parser.cli._print_validation", lambda _config, **_kwargs: True)
-    monkeypatch.setattr("wp_log_parser.cli.fetch_post", lambda _config, _post_id: _post(303))
+    monkeypatch.setattr("wp_log_parser.service.fetch_post", lambda _config, _post_id: _post(303))
 
     exit_code = cli.main(["post-to-ics", "--config", str(config_path), "--post-id", "303"])
 

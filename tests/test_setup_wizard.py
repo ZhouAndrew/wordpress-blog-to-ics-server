@@ -182,3 +182,50 @@ def test_existing_config_default_answers_preserve_non_default_values(monkeypatch
     assert "logs_dir" in out
     assert "caldav_index_path" in out
     assert "existing-secret" not in out
+
+
+def test_setup_wizard_wpcli_mode_writes_strictly_loadable_local_config(monkeypatch, tmp_path):
+    config_path = tmp_path / "config.json"
+    values = iter(["", "", "UTC", "y", "0", "n", "y", "10", "", "n", "y"])
+    monkeypatch.setattr("builtins.input", lambda _=None: next(values))
+    monkeypatch.setattr("wp_log_parser.setup_wizard.prompt_executable", lambda _l, _e, default: default)
+    monkeypatch.setattr("wp_log_parser.setup_wizard.prompt_existing_path", lambda _l, _e, default: ".")
+    monkeypatch.setattr("wp_log_parser.setup_wizard.prompt_directory", lambda _l, _e, default: str(tmp_path / default.strip("./")))
+    monkeypatch.setattr("wp_log_parser.setup_wizard.validate_dependencies", lambda: [])
+    monkeypatch.setattr("wp_log_parser.setup_wizard.validate_python_path", lambda _p: _ok_result("python"))
+    monkeypatch.setattr("wp_log_parser.setup_wizard.validate_output_dir_writable", lambda _p: _ok_result("dir"))
+    monkeypatch.setattr("wp_log_parser.setup_wizard.validate_wp_cli", lambda _p: _ok_result("wp"))
+    monkeypatch.setattr("wp_log_parser.setup_wizard.validate_wordpress_path", lambda _p: _ok_result("wp_path"))
+
+    run_setup_wizard(str(config_path))
+
+    cfg = load_config(str(config_path))
+    assert cfg.wordpress_mode == "wpcli"
+    assert cfg.wp_cli_path == "wp"
+    assert cfg.wp_path == "."
+    assert cfg.default_last_event_minutes == 0
+    assert cfg.caldav_url == ""
+    assert cfg.caldav_username == ""
+    assert cfg.caldav_password == ""
+
+
+def test_setup_wizard_rest_mode_requires_credentials_and_masks_secret(monkeypatch, tmp_path, capsys):
+    config_path = tmp_path / "config.json"
+    values = iter(["2", "https://example.test", "alice", "y", "", "UTC", "y", "30", "n", "y", "20", "", "n", "y"])
+    monkeypatch.setattr("builtins.input", lambda _=None: next(values))
+    monkeypatch.setattr("getpass.getpass", lambda _=None: "rest-secret")
+    monkeypatch.setattr("wp_log_parser.setup_wizard.prompt_executable", lambda _l, _e, default: default)
+    monkeypatch.setattr("wp_log_parser.setup_wizard.prompt_directory", lambda _l, _e, default: str(tmp_path / default.strip("./")))
+    monkeypatch.setattr("wp_log_parser.setup_wizard.validate_dependencies", lambda: [])
+    monkeypatch.setattr("wp_log_parser.setup_wizard.validate_python_path", lambda _p: _ok_result("python"))
+    monkeypatch.setattr("wp_log_parser.setup_wizard.validate_output_dir_writable", lambda _p: _ok_result("dir"))
+    monkeypatch.setattr("wp_log_parser.setup_wizard.validate_rest_credentials", lambda *_a, **_k: _ok_result("rest"))
+
+    run_setup_wizard(str(config_path))
+
+    cfg = load_config(str(config_path))
+    assert cfg.wordpress_mode == "rest"
+    assert cfg.base_url == "https://example.test"
+    assert cfg.username == "alice"
+    assert cfg.app_password == "rest-secret"
+    assert "rest-secret" not in capsys.readouterr().out

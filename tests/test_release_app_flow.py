@@ -70,8 +70,10 @@ def test_blocks_dry_run_when_caldav_url_missing(monkeypatch, capsys):
 
 
 def test_recent_posts_newest_first():
+    from wp_log_parser.wordpress import sort_and_limit_posts
+
     posts = [{"date": "2026-01-01"}, {"date": "2026-01-03"}, {"date": "2026-01-02"}]
-    out = cli.list_posts.__globals__["list_posts_wpcli"].__globals__["sort_and_limit_posts"](posts)
+    out = sort_and_limit_posts(posts)
     assert [p["date"] for p in out] == ["2026-01-03", "2026-01-02", "2026-01-01"]
 
 
@@ -81,14 +83,13 @@ def test_preview_requires_selection_not_first_post(monkeypatch):
     monkeypatch.setattr(cli, "load_config", lambda _path: cfg)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr(cli, "run_health_check", lambda *a, **k: {"wordpress_runtime": [], "parser_runtime": [], "ics_runtime": []})
-    monkeypatch.setattr(cli, "list_posts", lambda _c: [
+    monkeypatch.setattr(cli.service, "list_posts", lambda _c: [
         {"id": 1, "title": "Hello world!", "date": "2026-01-01", "status": "publish"},
         {"id": 2, "title": "Diary", "date": "2026-01-02", "status": "publish"},
     ])
     calls = []
     class P: post_content = ""; post_date = "2026-01-02"
-    monkeypatch.setattr(cli, "fetch_post", lambda _c, pid: calls.append(pid) or P())
-    monkeypatch.setattr(cli, "parse_post_content", lambda *a, **k: type("X", (), {"entries": [], "ignored_blocks": [], "warnings": [], "to_dict": lambda self, include_ignored=True: {}})())
+    monkeypatch.setattr(cli.service, "parse_post", lambda _c, pid: calls.append(pid) or type("X", (), {"entries": [], "ignored_blocks": [], "warnings": [], "to_dict": lambda self, include_ignored=True: {}})())
     inputs = iter(["n", "5", "2", "n", "0"])
     monkeypatch.setattr("builtins.input", lambda _p="": next(inputs))
     assert cli.main(["app", "--config", "./config.json"]) == 0
@@ -102,7 +103,14 @@ def test_update_today_ics_calls_correct_signature(monkeypatch, capsys):
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr(cli, "run_health_check", lambda *a, **k: {"wordpress_runtime": [], "parser_runtime": [], "ics_runtime": []})
     called = {}
-    monkeypatch.setattr(cli, "generate_today_ics", lambda output_dir, timezone, preferred_post_id=None, mode="copy": called.update({"output_dir": output_dir, "timezone": timezone, "preferred_post_id": preferred_post_id, "mode": mode}) or "/tmp/today.ics")
+    monkeypatch.setattr(
+        cli.service,
+        "update_today_ics",
+        lambda config, post_id=None, mode="copy": called.update(
+            {"output_dir": config.output_dir, "timezone": config.timezone, "preferred_post_id": post_id, "mode": mode}
+        )
+        or {"target_file": "today.ics", "source_file": "2026-05-05_post_100_latest.ics"},
+    )
     monkeypatch.setattr(cli, "today_date_str", lambda _tz: "2026-05-05")
     monkeypatch.setattr(cli, "find_today_ics_candidates", lambda *_args, **_kwargs: [Path("2026-05-05_post_100_latest.ics")])
     inputs = iter(["11", "0"])
@@ -130,7 +138,7 @@ def test_update_today_ics_app_flow_allows_candidate_disambiguation(monkeypatch, 
         ],
     )
     monkeypatch.setattr(
-        cli,
+        cli.service,
         "list_posts",
         lambda _config: [
             {"id": 100, "modified_gmt": "2026-05-05 11:00:00", "date": "2026-05-05 10:30:00"},
@@ -139,12 +147,12 @@ def test_update_today_ics_app_flow_allows_candidate_disambiguation(monkeypatch, 
     )
     called = {}
     monkeypatch.setattr(
-        cli,
-        "generate_today_ics",
-        lambda output_dir, timezone, preferred_post_id=None, mode="copy": called.update(
-            {"output_dir": output_dir, "timezone": timezone, "preferred_post_id": preferred_post_id, "mode": mode}
+        cli.service,
+        "update_today_ics",
+        lambda config, post_id=None, mode="copy": called.update(
+            {"output_dir": config.output_dir, "timezone": config.timezone, "preferred_post_id": post_id, "mode": mode}
         )
-        or "/tmp/today.ics",
+        or {"target_file": "today.ics", "source_file": "2026-05-05_post_99_older.ics"},
     )
     inputs = iter(["11", "2", "0"])
     monkeypatch.setattr("builtins.input", lambda _p="": next(inputs))
@@ -160,7 +168,7 @@ def test_local_publish_menu_calls_publish_once_with_days(monkeypatch):
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr(cli, "run_health_check", lambda *a, **k: {"wordpress_runtime": [], "parser_runtime": [], "ics_runtime": []})
     called = {}
-    monkeypatch.setattr(cli, "publish_once", lambda config, days, verbose=False: called.update({"days": days, "verbose": verbose}) or {"ok": True})
+    monkeypatch.setattr(cli.service, "publish_ics", lambda config, days, verbose=False: called.update({"days": days, "verbose": verbose}) or {"ok": True})
     inputs = iter(["n", "10", "3", "0"])
     monkeypatch.setattr("builtins.input", lambda _p="": next(inputs))
     assert cli.main(["app", "--config", "./config.json"]) == 0
@@ -190,8 +198,8 @@ def test_service_menu_calls_run_service_loop_with_interval_seconds(monkeypatch):
     monkeypatch.setattr(cli, "run_health_check", lambda *a, **k: {"wordpress_runtime": [], "parser_runtime": [], "ics_runtime": []})
     called = {}
     monkeypatch.setattr(
-        cli,
-        "run_service_loop",
+        cli.service,
+        "run_ics_service",
         lambda config, days, interval_seconds, host, port, verbose=False: called.update(
             {"days": days, "interval_seconds": interval_seconds, "host": host, "port": port, "verbose": verbose}
         ),
@@ -208,7 +216,7 @@ def test_today_ics_missing_source_message(monkeypatch, capsys):
     monkeypatch.setattr(cli, "load_config", lambda _path: cfg)
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.setattr(cli, "run_health_check", lambda *a, **k: {"wordpress_runtime": [], "parser_runtime": [], "ics_runtime": []})
-    monkeypatch.setattr(cli, "generate_today_ics", lambda *a, **k: (_ for _ in ()).throw(FileNotFoundError("missing")))
+    monkeypatch.setattr(cli.service, "update_today_ics", lambda *a, **k: (_ for _ in ()).throw(FileNotFoundError("missing")))
     inputs = iter(["n", "11", "0"])
     monkeypatch.setattr("builtins.input", lambda _p="": next(inputs))
     assert cli.main(["app", "--config", "./config.json"]) == 0

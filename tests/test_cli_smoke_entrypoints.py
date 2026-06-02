@@ -8,6 +8,7 @@ def _stub_runtime(monkeypatch):
     monkeypatch.setattr(cli, "config_exists", lambda _path: True)
     monkeypatch.setattr(cli, "load_config", lambda _path: AppConfig())
     monkeypatch.setattr(cli, "_print_validation", lambda *_a, **_k: True)
+    monkeypatch.setattr(cli, "_validate_update_today", lambda *_a, **_k: True)
 
 
 def test_top_level_help_exits_zero(capsys):
@@ -53,21 +54,33 @@ def test_required_usage_paths_return_error_codes(monkeypatch):
 def test_smoke_entry_points_dispatch_without_wordpress(monkeypatch):
     _stub_runtime(monkeypatch)
 
-    monkeypatch.setattr(cli, "fetch_post", lambda *_a, **_k: type("P", (), {"post_id": 9, "post_date": "2026-05-01", "post_content": "", "title": "T"})())
-    monkeypatch.setattr(cli, "normalize_post_date", lambda d: d)
     monkeypatch.setattr(
-        cli,
-        "parse_post_content",
-        lambda *_a, **_k: type("X", (), {"entries": [type("E", (), {"status": "ready"})()], "ignored_blocks": [], "warnings": []})(),
+        cli.service,
+        "post_to_ics",
+        lambda *_a, **_k: {
+            "post_id": 9,
+            "title": "T",
+            "post_date": "2026-05-01",
+            "output_file": "/tmp/out.ics",
+            "entry_count": 1,
+            "ignored_block_count": 0,
+            "warning_count": 0,
+            "warnings": [],
+            "parsed_entry_count": 1,
+        },
     )
-    monkeypatch.setattr(cli, "attach_source_metadata", lambda *_a, **_k: None)
-    monkeypatch.setattr(cli, "write_post_ics", lambda *_a, **_k: "/tmp/out.ics")
-    monkeypatch.setattr(cli, "publish_once", lambda *_a, **_k: {"ok": True, "items": [], "published_count": 0})
-    monkeypatch.setattr(cli, "run_service_loop", lambda *_a, **_k: None)
-    monkeypatch.setattr(cli, "today_date_str", lambda _tz: "2026-05-24")
-    monkeypatch.setattr(cli, "find_today_ics_candidates", lambda *_a, **_k: [])
-    monkeypatch.setattr(cli, "select_today_ics", lambda *_a, **_k: type("S", (), {"name": "2026-05-24_post_9_demo.ics"})())
-    monkeypatch.setattr(cli, "generate_today_ics", lambda *_a, **_k: type("T", (), {"name": "today.ics"})())
+    monkeypatch.setattr(cli.service, "publish_ics", lambda *_a, **_k: {"ok": True, "items": [], "published_count": 0})
+    monkeypatch.setattr(
+        cli.service,
+        "update_today_ics",
+        lambda *_a, **_k: {
+            "today": "2026-05-24",
+            "source_file": "2026-05-24_post_9_demo.ics",
+            "target_file": "today.ics",
+            "mode": "copy",
+        },
+    )
+    monkeypatch.setattr(cli.service, "run_ics_service", lambda *_a, **_k: None)
 
     assert cli.main(["post-to-ics", "--config", "./config.json", "--post-id", "9"]) == 0
     assert cli.main(["publish-ics", "--config", "./config.json", "--days", "1"]) == 0

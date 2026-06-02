@@ -6,13 +6,9 @@ from pathlib import Path
 from typing import Any
 
 from .config import AppConfig
+from . import service
 from .debug_report import sanitize_config
-from .fetcher import fetch_post, normalize_post_date
-from .ics import generate_ics
 from .operations import write_runtime_log
-from .parser import parse_post_content
-from .source_metadata import attach_source_metadata
-from .service import list_posts
 from .validators import (
     validate_caldav_config,
     validate_custom_parsing_patterns,
@@ -71,7 +67,7 @@ def run_health_check(
 
     if full:
         try:
-            posts = list_posts(config)
+            posts = service.list_posts(config)
             report["wordpress_runtime"].append(_item("ok", "listed posts", {"posts_listed": len(posts)}))
         except Exception as exc:
             report["wordpress_runtime"].append(_item("error", f"failed to list posts: {exc}", fixable=True))
@@ -82,9 +78,8 @@ def run_health_check(
             for sample in sorted(posts, key=lambda p: str(p.get("date", "")), reverse=True):
                 sampled += 1
                 try:
-                    post = fetch_post(config, int(sample["id"]))
-                    candidate = parse_post_content(post.post_content, normalize_post_date(post.post_date), config)
-                    attach_source_metadata(candidate, post)
+                    candidate = service.parse_post(config, int(sample["id"]))
+                    post = service.fetch_post(config, int(sample["id"]))
                 except Exception as exc:
                     report["parser_runtime"].append(_item("warning", f"skipped sample post due to error: {exc}", {"sample_post_id": sample.get("id")}, True))
                     continue
@@ -106,7 +101,7 @@ def run_health_check(
                 )
             else:
                 try:
-                    ics = generate_ics([e.to_dict() for e in parsed.entries], timezone=config.timezone)
+                    ics = service.export_ics_from_entries(config, [e.to_dict() for e in parsed.entries])
                     report["ics_runtime"].append(_item("ok", "ics generated", {"ics_generation_status": "ok", "ics_byte_size": len(ics.encode("utf-8"))}))
                 except Exception as exc:
                     report["ics_runtime"].append(_item("error", f"ics generation failed: {exc}", {"ics_generation_status": "error"}, fixable=True))
