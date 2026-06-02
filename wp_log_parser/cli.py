@@ -27,8 +27,8 @@ from .ics_exporter import write_post_ics
 from .models import LogEntry
 from .parser import parse_post_content
 from .source_metadata import attach_source_metadata
-from .service import run_today_pipeline
-from .service_mode import publish_once, run_service_loop
+from .service import run_today_pipeline, export_post_to_ics, publish_once, run_service_loop, update_today_ics
+from . import service_mode as _service_mode
 from .setup_wizard import run_setup_wizard, select_post_id
 from .sync import run_caldav_sync
 from .timeline import apply_timeline
@@ -324,6 +324,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_run_service.add_argument("--host", default="127.0.0.1")
     p_run_service.add_argument("--port", type=int, default=5333)
     p_run_service.add_argument("--verbose", action="store_true")
+    p_run_service.add_argument("--once", action="store_true", help="Run one publish cycle without starting the HTTP server.")
 
     p_sync_caldav = sub.add_parser("sync-caldav")
     p_sync_caldav.add_argument("--config", default="./config.json")
@@ -352,6 +353,25 @@ def build_parser() -> argparse.ArgumentParser:
 
     return parser
 
+
+
+def _export_post_to_ics_via_service(config, post_id: int, verbose: bool = False):
+    """Call the service-layer export flow, preserving legacy test monkeypatch seams."""
+    _service_mode.fetch_post = fetch_post
+    _service_mode.normalize_post_date = normalize_post_date
+    _service_mode.parse_post_content = parse_post_content
+    _service_mode.attach_source_metadata = attach_source_metadata
+    _service_mode.write_post_ics = write_post_ics
+    return export_post_to_ics(config, post_id, verbose=verbose)
+
+
+def _update_today_ics_via_service(config, mode: str = "copy", post_id: int | None = None, verbose: bool = False):
+    """Call the service-layer today alias flow, preserving legacy test monkeypatch seams."""
+    _service_mode.today_date_str = today_date_str
+    _service_mode.find_today_ics_candidates = find_today_ics_candidates
+    _service_mode.select_today_ics = select_today_ics
+    _service_mode.generate_today_ics = generate_today_ics
+    return update_today_ics(config, mode=mode, post_id=post_id, verbose=verbose)
 
 def _print_debug_header(command: str, config_path: str, config, extras: dict[str, object] | None = None) -> None:
     print(f"[DEBUG] command: {command}")
@@ -716,54 +736,20 @@ def main(argv: list[str] | None = None) -> int:
         if _debug_enabled(args):
             _print_debug_header(args.command, args.config, config, {"post_ids": [args.post_id]})
         try:
-            post = fetch_post(config, args.post_id)
-            post_date = normalize_post_date(post.post_date)
-            parsed = parse_post_content(post.post_content, post_date, config, verbose=args.verbose)
-            attach_source_metadata(parsed, post)
-            if parsed.warnings:
-                print(f"[WARN] Timeline warnings: {len(parsed.warnings)}")
-                for warn in parsed.warnings:
-                    print(f"[WARN] {warn.reason}: {warn.message}")
-            if not parsed.entries:
-                print("No valid timed log entries found in post.")
-                last_run_path, timestamped_path = write_recent_run_snapshot(
-                    error_dir=config.error_dir,
-                    command=args.command,
-                    success=False,
-                    config=config,
-                    summary={"post_id": post.post_id, "entry_count": 0},
-                    processed_post_ids=[post.post_id],
-                    error=RuntimeError("No valid timed log entries found in post."),
-                )
-                print(f"Debug report written to: {last_run_path}")
-                if timestamped_path is not None:
-                    print(f"Debug report written to: {timestamped_path}")
-                return 1
-            export_entries = _prepare_entries_for_export(parsed.entries, config.review_entry_export_mode)
-            out_path = write_post_ics(post, export_entries, config.output_dir, config.timezone)
-            result = {
-                "post_id": post.post_id,
-                "title": post.title,
-                "post_date": post.post_date,
-                "output_file": str(out_path),
-                "entry_count": len(export_entries),
-                "ignored_block_count": len(parsed.ignored_blocks),
-                "warning_count": len(parsed.warnings),
-            }
+            result = _export_post_to_ics_via_service(config, args.post_id, verbose=args.verbose)
+            public_result = {k: v for k, v in result.items() if k not in {"entries", "ignored_blocks"}}
             _write_snapshot_best_effort(
                 error_dir=config.error_dir,
                 command=args.command,
                 success=True,
                 config=config,
-                summary=result,
-                processed_post_ids=[post.post_id],
+                summary=public_result,
+                processed_post_ids=[int(result["post_id"])],
             )
             if _debug_enabled(args):
-                print(f"[DEBUG] processed_post_ids: {[post.post_id]}")
-                print(f"[DEBUG] event_count: {len(parsed.entries)}")
-            if args.verbose:
-                print(f"[OK] Wrote ICS file: {out_path}")
-            print(json.dumps(result, ensure_ascii=False, indent=2))
+                print(f"[DEBUG] processed_post_ids: {[int(result['post_id'])]}")
+                print(f"[DEBUG] event_count: {len(result.get('entries', []))}")
+            print(json.dumps(public_result, ensure_ascii=False, indent=2))
             return 0
         except Exception as exc:
             if _debug_enabled(args):
@@ -832,30 +818,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "update-today-ics":
         try:
-            today = today_date_str(config.timezone)
-            candidates = find_today_ics_candidates(Path(config.output_dir), today)
-            selected = select_today_ics(candidates, args.post_id)
-            target = generate_today_ics(
-                config.output_dir,
-                config.timezone,
-                preferred_post_id=args.post_id,
-                mode=args.mode,
-            )
-            if args.verbose:
-                print(f"[OK] Selected today's ICS: {selected.name}")
-                print(f"[OK] Updated alias: {target.name}")
-            print(
-                json.dumps(
-                    {
-                        "today": today,
-                        "source_file": selected.name,
-                        "target_file": target.name,
-                        "mode": args.mode,
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                )
-            )
+            result = _update_today_ics_via_service(config, mode=args.mode, post_id=args.post_id, verbose=args.verbose)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
         except Exception as exc:
             print(f"[ERROR] {exc}")
@@ -863,14 +827,18 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "run-ics-service":
         try:
-            run_service_loop(
-                config=config,
-                days=args.days,
-                interval_seconds=args.interval,
-                host=args.host,
-                port=args.port,
-                verbose=args.verbose,
-            )
+            if args.once:
+                result = publish_once(config, days=args.days, verbose=args.verbose)
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+            else:
+                run_service_loop(
+                    config=config,
+                    days=args.days,
+                    interval_seconds=args.interval,
+                    host=args.host,
+                    port=args.port,
+                    verbose=args.verbose,
+                )
             return 0
         except KeyboardInterrupt:
             print("[INFO] Service interrupted. Shutting down cleanly.")

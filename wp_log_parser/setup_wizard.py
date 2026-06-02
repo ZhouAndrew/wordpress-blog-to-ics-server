@@ -10,6 +10,7 @@ from .service import list_posts
 from .validators import (
     validate_caldav_config,
     validate_dependencies,
+    validate_output_dir,
     validate_output_dir_writable,
     validate_python_path,
     validate_rest_credentials,

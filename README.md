@@ -289,6 +289,12 @@ python -m wp_log_parser update-today-ics --config ./config.json --mode symlink
 python -m wp_log_parser run-ics-service --config ./config.json --days 7 --interval 300 --host 127.0.0.1 --port 5333
 ```
 
+Run a single publish cycle without starting the HTTP server:
+
+```bash
+python -m wp_log_parser run-ics-service --config ./config.json --days 7 --once
+```
+
 ### 7) Incremental CalDAV sync
 
 Dry-run (default, safe; writes no CalDAV changes and refreshes real-sync marker):
@@ -395,7 +401,7 @@ Deletion behavior:
 - `post-to-ics` – fetch + parse + export one post to ICS
 - `publish-ics` – generate ICS files for recent posts and index artifacts
 - `update-today-ics` – create/update `today.ics` alias
-- `run-ics-service` – periodic publish + static HTTP server
+- `run-ics-service` – periodic publish + static HTTP server; add `--once` for a single publish cycle
 - `sync-caldav` – incremental event-level CalDAV synchronization
 
 > Note: if you choose `caldav_deletion_mode: "cancel"`, removed entries are kept as CANCELLED tombstones in `index.events` (while `index.posts` ownership for removed posts is dropped). Tombstone cleanup is not implemented yet.
