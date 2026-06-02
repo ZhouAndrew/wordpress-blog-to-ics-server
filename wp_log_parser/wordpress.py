@@ -45,14 +45,16 @@ def _parse_post_date(value: object) -> datetime:
     return datetime.min.replace(tzinfo=timezone.utc)
 
 
+def _coerce_post_id(value: object) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _post_sort_key(post: dict[str, str | int]) -> tuple[datetime, int]:
     post_datetime = _parse_post_date(post.get("date"))
-    post_id = post.get("id", 0)
-    try:
-        sort_id = int(post_id)
-    except (TypeError, ValueError):
-        sort_id = 0
-    return (post_datetime, sort_id)
+    return (post_datetime, _coerce_post_id(post.get("id", 0)))
 
 
 def sort_and_limit_posts(
@@ -139,6 +141,7 @@ def find_today_post_id_wpcli(wp_path: str, local_date: str, wp_cli_path: str = "
         f"--date_query=after={local_date} 00:00:00,before={local_date} 23:59:59,inclusive=1",
         "--orderby=date",
         "--order=desc",
+        "--fields=ID,post_title,post_date,post_modified_gmt,post_status",
         "--format=json",
         f"--path={wp_path}",
     ]
@@ -151,9 +154,20 @@ def find_today_post_id_wpcli(wp_path: str, local_date: str, wp_cli_path: str = "
     except json.JSONDecodeError as exc:
         raise MalformedResponseError("wp-cli returned invalid JSON") from exc
 
-    if not rows:
+    posts = [
+        {
+            "id": _coerce_post_id(row.get("ID")),
+            "title": row.get("post_title", "") or "",
+            "date": row.get("post_date", "") or "",
+            "status": row.get("post_status", "") or "",
+            "modified_gmt": row.get("post_modified_gmt", "") or "",
+        }
+        for row in rows
+    ]
+    candidates = sort_and_limit_posts(posts)
+    if not candidates:
         raise PostNotFoundError(f"No post found for date {local_date}")
-    return int(rows[0]["ID"])
+    return int(candidates[0]["id"])
 
 
 def list_posts_wpcli(
@@ -295,7 +309,9 @@ def find_today_post_id_rest(
 
     endpoint = (
         f"{base_url.rstrip('/')}/wp-json/wp/v2/posts?after={local_date}T00:00:00"
-        f"&before={local_date}T23:59:59&context=edit&per_page=1"
+        f"&before={local_date}T23:59:59&context=edit&status=any"
+        "&orderby=date&order=desc&per_page=100"
+        "&_fields=id,title,date,modified_gmt,status"
     )
     response = requests.get(endpoint, auth=(username, app_password), verify=verify_ssl, timeout=20)
 
@@ -305,8 +321,24 @@ def find_today_post_id_rest(
         raise MalformedResponseError(f"Unexpected REST status code: {response.status_code}")
 
     payload = response.json()
-    if not payload:
+    if not isinstance(payload, list):
+        raise MalformedResponseError("REST payload must be a list")
+
+    posts = []
+    for item in payload:
+        if not isinstance(item, dict) or "id" not in item:
+            raise MalformedResponseError("REST payload missing id")
+        posts.append(
+            {
+                "id": _coerce_post_id(item.get("id")),
+                "title": item.get("title", "") or "",
+                "date": item.get("date", "") or "",
+                "status": item.get("status", "") or "",
+                "modified_gmt": item.get("modified_gmt", "") or "",
+            }
+        )
+
+    candidates = sort_and_limit_posts(posts)
+    if not candidates:
         raise PostNotFoundError(f"No post found for date {local_date}")
-    if "id" not in payload[0]:
-        raise MalformedResponseError("REST payload missing id")
-    return int(payload[0]["id"])
+    return int(candidates[0]["id"])
