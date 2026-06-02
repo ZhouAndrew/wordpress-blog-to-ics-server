@@ -25,6 +25,7 @@ def publish_post(config: AppConfig, post_id: int, verbose: bool = False) -> dict
     post_date = normalize_post_date(post.post_date)
     parsed: ParsedPost = parse_post_content(post.post_content, post_date, config, verbose=verbose)
     attach_source_metadata(parsed, post)
+    getattr(parsed, "refresh_ics_preview", lambda _timezone: "")(config.timezone)
 
     if not parsed.entries:
         if verbose:

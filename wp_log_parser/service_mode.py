@@ -50,8 +50,10 @@ def publish_once(config: AppConfig, days: int, verbose: bool = False) -> dict[st
         post_date = normalize_post_date(post.post_date)
         parsed = parse_post_content(post.post_content, post_date, config, verbose=verbose)
         attach_source_metadata(parsed, post)
-        if parsed.warnings and verbose:
-            for warn in parsed.warnings:
+        getattr(parsed, "refresh_ics_preview", lambda _timezone: "")(config.timezone)
+        warnings = getattr(parsed, "warnings", [])
+        if warnings and verbose:
+            for warn in warnings:
                 print(f"[WARN] post {post_id}: {warn.reason} - {warn.message}")
         if not parsed.entries:
             if verbose:
@@ -81,7 +83,7 @@ def publish_once(config: AppConfig, days: int, verbose: bool = False) -> dict[st
                 "ics_url": build_public_ics_url(config.ics_base_url, out_path.name),
                 "entry_count": len(export_entries),
                 "ignored_block_count": len(parsed.ignored_blocks),
-                "warning_count": len(parsed.warnings),
+                "warning_count": len(getattr(parsed, "warnings", [])),
             }
         )
 

@@ -99,3 +99,24 @@ def test_validate_config_reports_custom_pattern_error_without_parse_execution(tm
     assert "[ERROR] config:" in out
     assert "custom_parsing_patterns[1]" in out
     assert "requires named group 'start'" in out
+
+
+def test_custom_pattern_precedence_can_override_builtin_point_shape() -> None:
+    cfg = AppConfig(
+        default_last_event_minutes=0,
+        custom_parsing_patterns=[
+            {
+                "name": "builtin_shape_override",
+                "regex": r"^(?P<start>\d{1,2}:\d{2})\s+(?P<summary>.*)$",
+                "type": "point",
+            }
+        ],
+    )
+    parsed = parse_post_content(
+        "<!-- wp:paragraph --><p>7:05 Custom takes precedence</p><!-- /wp:paragraph -->",
+        "2026-04-11",
+        cfg,
+    )
+
+    assert parsed.entries[0].start_time == "07:05"
+    assert parsed.entries[0].summary == "Custom takes precedence"
