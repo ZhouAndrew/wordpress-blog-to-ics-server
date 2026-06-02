@@ -720,9 +720,10 @@ def main(argv: list[str] | None = None) -> int:
             post_date = normalize_post_date(post.post_date)
             parsed = parse_post_content(post.post_content, post_date, config, verbose=args.verbose)
             attach_source_metadata(parsed, post)
-            if parsed.warnings:
-                print(f"[WARN] Timeline warnings: {len(parsed.warnings)}")
-                for warn in parsed.warnings:
+            warnings = getattr(parsed, "warnings", [])
+            if warnings:
+                print(f"[WARN] Timeline warnings: {len(warnings)}")
+                for warn in warnings:
                     print(f"[WARN] {warn.reason}: {warn.message}")
             if not parsed.entries:
                 print("No valid timed log entries found in post.")
@@ -748,7 +749,7 @@ def main(argv: list[str] | None = None) -> int:
                 "output_file": str(out_path),
                 "entry_count": len(export_entries),
                 "ignored_block_count": len(parsed.ignored_blocks),
-                "warning_count": len(parsed.warnings),
+                "warning_count": len(warnings),
             }
             _write_snapshot_best_effort(
                 error_dir=config.error_dir,

@@ -102,3 +102,74 @@ def test_post_to_ics_surfaces_overlap_warning_and_blocks_on_error_mode(tmp_path,
     assert rc == 1
     assert "[WARN] Timeline warnings: 1" in out
     assert "overlap found" in out
+
+
+def test_validate_config_wpcli_exit_success_when_selected_mode_checks_pass(tmp_path, monkeypatch, capsys):
+    cfg_path = tmp_path / "config.json"
+    out = tmp_path / "out"
+    err = tmp_path / "err"
+    logs = tmp_path / "logs"
+    out.mkdir()
+    err.mkdir()
+    logs.mkdir()
+    wp_root = tmp_path / "wp"
+    wp_root.mkdir()
+    (wp_root / "wp-config.php").write_text("<?php", encoding="utf-8")
+    save_config(AppConfig(output_dir=str(out), error_dir=str(err), logs_dir=str(logs), wp_path=str(wp_root)), str(cfg_path))
+    monkeypatch.setattr(
+        cli,
+        "validate_wp_cli",
+        lambda _path: type("R", (), {"ok": True, "name": "wp_cli", "message": "ok"})(),
+    )
+
+    rc = cli.main(["validate-config", "--config", str(cfg_path)])
+
+    assert rc == 0
+    assert "[OK] wp_cli" in capsys.readouterr().out
+
+
+def test_validate_config_rest_exit_failure_for_invalid_credentials(tmp_path, monkeypatch, capsys):
+    cfg_path = tmp_path / "config.json"
+    out = tmp_path / "out"
+    err = tmp_path / "err"
+    logs = tmp_path / "logs"
+    out.mkdir()
+    err.mkdir()
+    logs.mkdir()
+    save_config(
+        AppConfig(
+            wordpress_mode="rest",
+            base_url="https://wp.example",
+            username="alice",
+            app_password="wrong",
+            output_dir=str(out),
+            error_dir=str(err),
+            logs_dir=str(logs),
+        ),
+        str(cfg_path),
+    )
+    monkeypatch.setattr(
+        cli,
+        "validate_rest_credentials",
+        lambda *_args: type(
+            "R",
+            (),
+            {"ok": False, "name": "rest", "message": "REST authentication failed; check app_password"},
+        )(),
+    )
+
+    rc = cli.main(["validate-config", "--config", str(cfg_path)])
+
+    out_text = capsys.readouterr().out
+    assert rc == 1
+    assert "[ERROR] rest: REST authentication failed; check app_password" in out_text
+
+
+def test_validate_config_reports_load_error_for_unknown_key(tmp_path, capsys):
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(json.dumps({"wordpress_mode": "wpcli", "extra": "nope"}), encoding="utf-8")
+
+    rc = cli.main(["validate-config", "--config", str(cfg_path)])
+
+    assert rc == 2
+    assert "Unknown config key" in capsys.readouterr().out

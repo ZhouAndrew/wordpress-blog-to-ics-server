@@ -64,24 +64,74 @@ def validate_output_dir_writable(path: str) -> ValidationResult:
 
 
 def validate_rest_credentials(base_url: str, username: str, app_password: str, verify_ssl: bool) -> ValidationResult:
+    if not isinstance(base_url, str) or not base_url.strip():
+        return ValidationResult(False, "rest", "base_url is required for wordpress_mode=rest; update setting 'base_url'", None)
     if not base_url.startswith(("http://", "https://")):
-        return ValidationResult(False, "rest", "Base URL must start with http:// or https://", base_url)
-    if not username or not app_password:
-        return ValidationResult(False, "rest", "Username and app password are required", None)
+        return ValidationResult(False, "rest", "base_url must start with http:// or https://; update setting 'base_url'", base_url)
+    if not isinstance(username, str) or not username.strip():
+        return ValidationResult(False, "rest", "username is required for wordpress_mode=rest; update setting 'username'", None)
+    if not isinstance(app_password, str) or not app_password.strip():
+        return ValidationResult(False, "rest", "app_password is required for wordpress_mode=rest; update setting 'app_password'", None)
+    if not isinstance(verify_ssl, bool):
+        return ValidationResult(False, "rest", "verify_ssl must be true or false; update setting 'verify_ssl'", None)
 
     if importlib.util.find_spec("requests") is None:
         return ValidationResult(False, "rest", "requests package is not installed", None)
 
+    endpoint = f"{base_url.rstrip('/')}/wp-json/wp/v2/users/me?context=edit"
     try:
         import requests
 
-        resp = requests.get(f"{base_url.rstrip('/')}/wp-json/wp/v2", verify=verify_ssl, timeout=10)
-        if resp.status_code >= 400:
-            return ValidationResult(False, "rest", f"REST endpoint unreachable ({resp.status_code})", None)
+        resp = requests.get(
+            endpoint,
+            auth=(username, app_password),
+            verify=verify_ssl,
+            timeout=10,
+        )
     except Exception as exc:
-        return ValidationResult(False, "rest", "REST endpoint request failed", str(exc))
+        return ValidationResult(
+            False,
+            "rest",
+            "REST connectivity failure while calling authenticated endpoint; check setting 'base_url' and network/SSL access",
+            str(exc),
+        )
 
-    return ValidationResult(True, "rest", "REST configuration looks reachable", None)
+    if resp.status_code in {401, 403}:
+        return ValidationResult(
+            False,
+            "rest",
+            "REST authentication failed at /wp-json/wp/v2/users/me; check settings 'username' and 'app_password'",
+            None,
+        )
+    if resp.status_code >= 400:
+        return ValidationResult(
+            False,
+            "rest",
+            f"REST connectivity failure: authenticated endpoint returned HTTP {resp.status_code}; check setting 'base_url'",
+            None,
+        )
+
+    try:
+        payload = resp.json()
+    except ValueError as exc:
+        return ValidationResult(
+            False,
+            "rest",
+            "Malformed REST response: authenticated endpoint did not return JSON",
+            str(exc),
+        )
+
+    if not isinstance(payload, dict):
+        return ValidationResult(False, "rest", "Malformed REST response: expected a JSON object from authenticated endpoint", None)
+    if "id" not in payload and "slug" not in payload and "username" not in payload and "name" not in payload:
+        return ValidationResult(
+            False,
+            "rest",
+            "Malformed REST response: authenticated user payload is missing expected user fields",
+            None,
+        )
+
+    return ValidationResult(True, "rest", "REST authentication succeeded against /wp-json/wp/v2/users/me", None)
 
 
 def validate_custom_parsing_patterns(config) -> ValidationResult:
