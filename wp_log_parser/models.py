@@ -53,6 +53,14 @@ class IgnoredBlock:
     reason: str
     raw: str = ""
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "index": self.index,
+            "type": self.type,
+            "reason": self.reason,
+            "raw": self.raw,
+        }
+
 
 @dataclass
 class ParsedPost:
@@ -63,6 +71,13 @@ class ParsedPost:
     source_id: Optional[str] = None
     managed_by: str = "wp_log_parser"
     warnings: list[ParseWarning] = field(default_factory=list)
+    ics_preview: str = ""
+
+    def refresh_ics_preview(self, timezone: str = "UTC") -> str:
+        from .ics import generate_ics
+
+        self.ics_preview = generate_ics(self.entries, timezone=timezone)
+        return self.ics_preview
 
     def to_dict(self, include_ignored: bool = True) -> dict[str, Any]:
         entries = []
@@ -77,6 +92,7 @@ class ParsedPost:
             "source_id": self.source_id,
             "managed_by": self.managed_by,
             "entries": entries,
-            "ignored_blocks": [block.__dict__ for block in self.ignored_blocks] if include_ignored else [],
+            "ignored_blocks": [block.to_dict() for block in self.ignored_blocks] if include_ignored else [],
+            "ics_preview": self.ics_preview,
             "warnings": [item.__dict__ for item in self.warnings],
         }

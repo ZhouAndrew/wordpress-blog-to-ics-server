@@ -1,23 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
-from .aliases import find_today_ics_candidates, generate_today_ics, select_today_ics, today_date_str
 from .config import AppConfig
-from .fetcher import fetch_post, list_recent_post_ids, normalize_post_date
 from .ics import build_public_ics_url
-from .ics_exporter import (
-    write_ignored_blocks,
-    write_parsed_post_json,
-    write_post_ics,
-    write_publish_index,
-    write_publish_index_html,
-)
-from .models import ParsedPost
-from .parser import parse_post_content
-from .source_metadata import attach_source_metadata
+from .service_mode import export_post_to_ics, publish_once
 
 
 def publish_post(config: AppConfig, post_id: int, verbose: bool = False) -> dict[str, Any] | None:
@@ -25,6 +12,7 @@ def publish_post(config: AppConfig, post_id: int, verbose: bool = False) -> dict
     post_date = normalize_post_date(post.post_date)
     parsed: ParsedPost = parse_post_content(post.post_content, post_date, config, verbose=verbose)
     attach_source_metadata(parsed, post)
+    getattr(parsed, "refresh_ics_preview", lambda _timezone: "")(config.timezone)
 
     if not parsed.entries:
         if verbose:
@@ -42,15 +30,15 @@ def publish_post(config: AppConfig, post_id: int, verbose: bool = False) -> dict
             print(f"[OK] Wrote ignored blocks: {ignored_path.name}")
 
     return {
-        "post_id": post.post_id,
-        "title": post.title,
-        "post_date": post.post_date,
-        "ics_file": out_path.name,
-        "ics_url": build_public_ics_url(config.ics_base_url, out_path.name),
-        "entry_count": len(parsed.entries),
-        "ignored_block_count": len(parsed.ignored_blocks),
-        "warning_count": len(parsed.warnings),
-        "parsed_json_file": out_path.name.replace(".ics", ".parsed.json"),
+        "post_id": result["post_id"],
+        "title": result["title"],
+        "post_date": result["post_date"],
+        "ics_file": result["ics_file"],
+        "ics_url": build_public_ics_url(config.ics_base_url, str(result["ics_file"])),
+        "entry_count": result["entry_count"],
+        "ignored_block_count": result["ignored_block_count"],
+        "warning_count": result["warning_count"],
+        "parsed_json_file": str(result.get("parsed_json_file") or ""),
     }
 
 
@@ -73,10 +61,14 @@ def publish_recent(config: AppConfig, days: int, verbose: bool = False) -> dict[
     today_source = None
     if items:
         try:
+            today = today_date_str(config.timezone)
+            today_candidates = find_today_ics_candidates(Path(config.output_dir), today)
+            selected_today = select_today_ics(today_candidates)
             generate_today_ics(config.output_dir, config.timezone)
-            today_candidates = find_today_ics_candidates(Path(config.output_dir), today_date_str(config.timezone))
-            today_source = select_today_ics(today_candidates).name
+            today_source = selected_today.name
             today_refreshed = True
+            if verbose:
+                print(f"[OK] Selected today source: {today_source}")
         except Exception as exc:
             if verbose:
                 print(f"[WARN] Could not refresh today.ics automatically: {exc}")

@@ -36,7 +36,7 @@ def test_repair_configuration_preserves_unrelated_existing_fields(monkeypatch, t
     ok = lambda name: type("R", (), {"ok": True, "name": name, "message": "ok", "details": ""})()
     monkeypatch.setattr("wp_log_parser.setup_wizard.validate_dependencies", lambda: [])
     monkeypatch.setattr("wp_log_parser.setup_wizard.validate_python_path", lambda _p: ok("python"))
-    monkeypatch.setattr("wp_log_parser.setup_wizard.validate_output_dir", lambda _p: ok("dir"))
+    monkeypatch.setattr("wp_log_parser.setup_wizard.validate_output_dir_writable", lambda _p: ok("dir"))
     monkeypatch.setattr("wp_log_parser.setup_wizard.validate_wp_cli", lambda _p: ok("wp"))
     monkeypatch.setattr("wp_log_parser.setup_wizard.validate_wordpress_path", lambda _p: ok("wp_path"))
     monkeypatch.setattr("getpass.getpass", lambda _=None: "")

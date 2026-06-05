@@ -31,3 +31,18 @@ def test_forbidden_runtime_files_not_tracked() -> None:
 
 def test_example_config_exists() -> None:
     assert Path("example.config.json").exists()
+
+
+def test_root_compatibility_scripts_delegate_to_package_services() -> None:
+    scripts = [
+        Path("export_post_id_to_ics_verbose.py"),
+        Path("publish_ics_server.py"),
+        Path("update_today_ics.py"),
+        Path("run_ics_service.py"),
+        Path("list_recent_posts.py"),
+    ]
+    for script in scripts:
+        text = script.read_text(encoding="utf-8")
+        assert "from wp_log_parser.service import" in text
+        assert "subprocess" not in text
+        assert "BEGIN:VCALENDAR" not in text

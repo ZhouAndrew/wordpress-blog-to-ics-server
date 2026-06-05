@@ -20,7 +20,13 @@ from .config import config_exists, create_default_config, load_config, save_conf
 from .exceptions import ConfigError
 from .debug_report import sanitize_config, write_recent_run_snapshot
 from .health import run_health_check
-from .operations import config_get, config_set, edit_config_file, write_runtime_log
+from .ics import generate_ics
+from .ics_exporter import write_post_ics
+from .models import LogEntry
+from .parser import parse_post_content
+from .source_metadata import attach_source_metadata
+from .service import run_today_pipeline, export_post_to_ics, publish_once, run_service_loop, update_today_ics
+from . import service_mode as _service_mode
 from .setup_wizard import run_setup_wizard, select_post_id
 from .sync import run_caldav_sync
 from .validators import (
@@ -267,6 +273,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_parse.add_argument("--config", default="./config.json")
     p_parse.add_argument("--post-id", type=int)
     p_parse.add_argument("--select-post-id", action="store_true", help="Interactively select a post ID from recent posts.")
+    p_parse.add_argument("--verbose", action="store_true")
 
     p_export = sub.add_parser("export-ics")
     p_export.add_argument("--config", default="./config.json")
@@ -301,6 +308,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_run_service.add_argument("--host", default="127.0.0.1")
     p_run_service.add_argument("--port", type=int, default=5333)
     p_run_service.add_argument("--verbose", action="store_true")
+    p_run_service.add_argument("--once", action="store_true", help="Run one publish cycle without starting the HTTP server.")
 
     p_sync_caldav = sub.add_parser("sync-caldav")
     p_sync_caldav.add_argument("--config", default="./config.json")
@@ -329,6 +337,25 @@ def build_parser() -> argparse.ArgumentParser:
 
     return parser
 
+
+
+def _export_post_to_ics_via_service(config, post_id: int, verbose: bool = False):
+    """Call the service-layer export flow, preserving legacy test monkeypatch seams."""
+    _service_mode.fetch_post = fetch_post
+    _service_mode.normalize_post_date = normalize_post_date
+    _service_mode.parse_post_content = parse_post_content
+    _service_mode.attach_source_metadata = attach_source_metadata
+    _service_mode.write_post_ics = write_post_ics
+    return export_post_to_ics(config, post_id, verbose=verbose)
+
+
+def _update_today_ics_via_service(config, mode: str = "copy", post_id: int | None = None, verbose: bool = False):
+    """Call the service-layer today alias flow, preserving legacy test monkeypatch seams."""
+    _service_mode.today_date_str = today_date_str
+    _service_mode.find_today_ics_candidates = find_today_ics_candidates
+    _service_mode.select_today_ics = select_today_ics
+    _service_mode.generate_today_ics = generate_today_ics
+    return update_today_ics(config, mode=mode, post_id=post_id, verbose=verbose)
 
 def _print_debug_header(command: str, config_path: str, config, extras: dict[str, object] | None = None) -> None:
     print(f"[DEBUG] command: {command}")
@@ -605,7 +632,11 @@ def main(argv: list[str] | None = None) -> int:
                 print("Interactive post selection requires a TTY.")
                 return 2
             post_id = select_post_id(config)
-        parsed = service.parse_post(config, int(post_id))
+        post = fetch_post(config, post_id)
+        post_date = normalize_post_date(post.post_date)
+        parsed = parse_post_content(post.post_content, post_date, config, verbose=args.verbose)
+        attach_source_metadata(parsed, post)
+        getattr(parsed, "refresh_ics_preview", lambda _timezone: "")(config.timezone)
         print(json.dumps(parsed.to_dict(include_ignored=True), ensure_ascii=False, indent=2))
         return 0
 
@@ -654,26 +685,54 @@ def main(argv: list[str] | None = None) -> int:
         if _debug_enabled(args):
             _print_debug_header(args.command, args.config, config, {"post_ids": [args.post_id]})
         try:
-            result = service.post_to_ics(config, args.post_id, verbose=args.verbose)
-            if result.get("warning_count"):
-                print(f"[WARN] Timeline warnings: {result['warning_count']}")
-                for warn in result.get("warnings", []):
-                    print(f"[WARN] {warn.get('reason')}: {warn.get('message')}")
-            snapshot_summary = {k: v for k, v in result.items() if k not in {"warnings", "parsed_entry_count"}}
+            post = fetch_post(config, args.post_id)
+            post_date = normalize_post_date(post.post_date)
+            parsed = parse_post_content(post.post_content, post_date, config, verbose=args.verbose)
+            attach_source_metadata(parsed, post)
+            getattr(parsed, "refresh_ics_preview", lambda _timezone: "")(config.timezone)
+            warnings = getattr(parsed, "warnings", [])
+            if warnings:
+                print(f"[WARN] Timeline warnings: {len(warnings)}")
+                for warn in warnings:
+                    print(f"[WARN] {warn.reason}: {warn.message}")
+            if not parsed.entries:
+                print("No valid timed log entries found in post.")
+                last_run_path, timestamped_path = write_recent_run_snapshot(
+                    error_dir=config.error_dir,
+                    command=args.command,
+                    success=False,
+                    config=config,
+                    summary={"post_id": post.post_id, "entry_count": 0},
+                    processed_post_ids=[post.post_id],
+                    error=RuntimeError("No valid timed log entries found in post."),
+                )
+                print(f"Debug report written to: {last_run_path}")
+                if timestamped_path is not None:
+                    print(f"Debug report written to: {timestamped_path}")
+                return 1
+            export_entries = _prepare_entries_for_export(parsed.entries, config.review_entry_export_mode)
+            out_path = write_post_ics(post, export_entries, config.output_dir, config.timezone)
+            result = {
+                "post_id": post.post_id,
+                "title": post.title,
+                "post_date": post.post_date,
+                "output_file": str(out_path),
+                "entry_count": len(export_entries),
+                "ignored_block_count": len(parsed.ignored_blocks),
+                "warning_count": len(warnings),
+            }
             _write_snapshot_best_effort(
                 error_dir=config.error_dir,
                 command=args.command,
                 success=True,
                 config=config,
-                summary=snapshot_summary,
+                summary=public_result,
                 processed_post_ids=[int(result["post_id"])],
             )
             if _debug_enabled(args):
                 print(f"[DEBUG] processed_post_ids: {[int(result['post_id'])]}")
-                print(f"[DEBUG] event_count: {result.get('parsed_entry_count', result.get('entry_count', 0))}")
-            if args.verbose:
-                print(f"[OK] Wrote ICS file: {result['output_file']}")
-            print(json.dumps(snapshot_summary, ensure_ascii=False, indent=2))
+                print(f"[DEBUG] event_count: {len(result.get('entries', []))}")
+            print(json.dumps(public_result, ensure_ascii=False, indent=2))
             return 0
         except service.NoTimedEntriesError as exc:
             if exc.parsed.warnings:
@@ -768,14 +827,18 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "run-ics-service":
         try:
-            service.run_ics_service(
-                config=config,
-                days=args.days,
-                interval_seconds=args.interval,
-                host=args.host,
-                port=args.port,
-                verbose=args.verbose,
-            )
+            if args.once:
+                result = publish_once(config, days=args.days, verbose=args.verbose)
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+            else:
+                run_service_loop(
+                    config=config,
+                    days=args.days,
+                    interval_seconds=args.interval,
+                    host=args.host,
+                    port=args.port,
+                    verbose=args.verbose,
+                )
             return 0
         except KeyboardInterrupt:
             print("[INFO] Service interrupted. Shutting down cleanly.")
