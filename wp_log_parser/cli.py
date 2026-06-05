@@ -774,6 +774,7 @@ def main(argv: list[str] | None = None) -> int:
                 "ignored_block_count": len(parsed.ignored_blocks),
                 "warning_count": len(warnings),
             }
+            public_result = {k: v for k, v in result.items() if k not in {"entries", "ignored_blocks"}}
             _write_snapshot_best_effort(
                 error_dir=config.error_dir,
                 command=args.command,
