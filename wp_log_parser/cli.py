@@ -752,7 +752,7 @@ def main(argv: list[str] | None = None) -> int:
                 "output_file": str(out_path),
                 "entry_count": len(export_entries),
                 "ignored_block_count": len(parsed.ignored_blocks),
-                "warning_count": len(getattr(parsed, "warnings", [])),
+                "warning_count": len(warnings),
             }
             _write_snapshot_best_effort(
                 error_dir=config.error_dir,
