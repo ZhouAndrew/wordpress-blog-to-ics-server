@@ -177,14 +177,18 @@ def fetch_post(config: AppConfig, post_id: int | None) -> PostData:
     raise ValueError("wordpress_mode must be either 'wpcli' or 'rest'")
 
 
-def find_today_post_id(config: AppConfig) -> int:
-    from .wordpress import find_today_post_id_rest, find_today_post_id_wpcli
-
+def today_local_date(config: AppConfig) -> str:
     try:
         tz = ZoneInfo(config.timezone)
     except Exception as exc:
         raise ValueError(f"Invalid timezone: {config.timezone}") from exc
-    local_today = datetime.now(tz).date().isoformat()
+    return datetime.now(tz).date().isoformat()
+
+
+def find_today_post_id(config: AppConfig) -> int:
+    from .wordpress import find_today_post_id_rest, find_today_post_id_wpcli
+
+    local_today = today_local_date(config)
 
     if config.wordpress_mode == "wpcli":
         return find_today_post_id_wpcli(config.wp_path, local_today, config.wp_cli_path)

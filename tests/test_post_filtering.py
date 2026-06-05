@@ -113,3 +113,15 @@ def test_sort_and_limit_posts_invalid_or_missing_dates_fall_back_and_tie_break_o
     result = sort_and_limit_posts(posts)
 
     assert [post["id"] for post in result] == [3, 4, 2, 1]
+
+
+def test_sort_and_limit_posts_identical_dates_tie_break_on_numeric_id_descending():
+    posts = [
+        {"id": 10, "date": "2026-01-07 09:00:00", "title": "A", "status": "publish"},
+        {"id": 12, "date": "2026-01-07 09:00:00", "title": "B", "status": "publish"},
+        {"id": 11, "date": "2026-01-07 09:00:00", "title": "C", "status": "publish"},
+    ]
+
+    result = sort_and_limit_posts(posts)
+
+    assert [post["id"] for post in result] == [12, 11, 10]

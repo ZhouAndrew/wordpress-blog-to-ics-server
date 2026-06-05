@@ -103,3 +103,71 @@ def test_parse_post_content_gutenberg_raw_unchanged() -> None:
     assert parsed.entries[0].end_time == "08:30"
     assert parsed.entries[1].end_time is None
     assert {item.reason for item in parsed.ignored_blocks} == {"unsupported_block_type"}
+
+
+def test_range_builtin_syntax_variants_are_matched_before_point_pattern() -> None:
+    separators = ["-", " - ", "–", "—", "~"]
+    for separator in separators:
+        parsed = parse_post_content(
+            f"<!-- wp:paragraph --><p>18:00{separator}18:23 Dinner</p><!-- /wp:paragraph -->",
+            "2026-04-11",
+            AppConfig(default_last_event_minutes=0),
+        )
+
+        assert len(parsed.entries) == 1
+        assert parsed.entries[0].start_time == "18:00"
+        assert parsed.entries[0].end_time == "18:23"
+        assert parsed.entries[0].summary == "Dinner"
+        assert parsed.entries[0].status == "ready"
+
+
+def test_unmatched_line_can_append_to_previous_entry() -> None:
+    post_content = "\n".join(
+        [
+            "<!-- wp:paragraph -->",
+            "<p>07:45 Breakfast</p>",
+            "<!-- /wp:paragraph -->",
+            "<!-- wp:paragraph -->",
+            "<p>with extra notes</p>",
+            "<!-- /wp:paragraph -->",
+            "<!-- wp:paragraph -->",
+            "<p>08:00 Work</p>",
+            "<!-- /wp:paragraph -->",
+        ]
+    )
+
+    parsed = parse_post_content(
+        post_content,
+        "2026-04-11",
+        AppConfig(default_last_event_minutes=0, unmatched_line_policy="append_to_previous"),
+    )
+
+    assert [entry.summary for entry in parsed.entries] == ["Breakfast with extra notes", "Work"]
+    assert [block.reason for block in parsed.ignored_blocks] == []
+
+
+def test_unsupported_gutenberg_blocks_report_index_type_reason_and_raw() -> None:
+    post_content = "\n".join(
+        [
+            "<!-- wp:file -->",
+            "<div class=\"wp-block-file\"><a href=\"x.pdf\">PDF</a></div>",
+            "<!-- /wp:file -->",
+            "<!-- wp:image -->",
+            "<figure><img src=\"x.jpg\" /></figure>",
+            "<!-- /wp:image -->",
+            "<!-- wp:list -->",
+            "<ul><li>Item</li></ul>",
+            "<!-- /wp:list -->",
+            "<!-- wp:heading -->",
+            "<h2>Heading</h2>",
+            "<!-- /wp:heading -->",
+        ]
+    )
+
+    parsed = parse_post_content(post_content, "2026-04-11", AppConfig(default_last_event_minutes=0))
+
+    ignored = [block.to_dict() for block in parsed.ignored_blocks]
+    assert [item["index"] for item in ignored] == [1, 2, 3, 4]
+    assert [item["type"] for item in ignored] == ["wp:file", "wp:image", "wp:list", "wp:heading"]
+    assert {item["reason"] for item in ignored} == {"unsupported_block_type"}
+    assert all(item["raw"] for item in ignored)

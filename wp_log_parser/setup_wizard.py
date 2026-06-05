@@ -11,13 +11,14 @@ from .validators import (
     validate_caldav_config,
     validate_dependencies,
     validate_output_dir,
-    validate_output_dir_writable,
     validate_python_path,
     validate_rest_credentials,
     validate_wordpress_path,
     validate_wp_cli,
 )
 
+
+validate_output_dir = validate_output_dir_writable
 
 def mask_secret(value: str) -> str:
     if not value:
@@ -229,9 +230,9 @@ def run_setup_wizard(config_path: str) -> AppConfig:
     results = []
     results.extend(validate_dependencies())
     results.append(validate_python_path(cfg.python_path))
-    results.append(validate_output_dir_writable(cfg.output_dir))
-    results.append(validate_output_dir_writable(cfg.error_dir))
-    results.append(validate_output_dir_writable(cfg.logs_dir))
+    results.append(validate_output_dir(cfg.output_dir))
+    results.append(validate_output_dir(cfg.error_dir))
+    results.append(validate_output_dir(cfg.logs_dir))
 
     if cfg.wordpress_mode == "wpcli":
         results.append(validate_wp_cli(cfg.wp_cli_path))

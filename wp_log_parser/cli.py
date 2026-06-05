@@ -290,6 +290,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_parse.add_argument("--config", default="./config.json")
     p_parse.add_argument("--post-id", type=int)
     p_parse.add_argument("--select-post-id", action="store_true", help="Interactively select a post ID from recent posts.")
+    p_parse.add_argument("--verbose", action="store_true")
 
     p_export = sub.add_parser("export-ics")
     p_export.add_argument("--config", default="./config.json")
@@ -653,8 +654,9 @@ def main(argv: list[str] | None = None) -> int:
             post_id = select_post_id(config)
         post = fetch_post(config, post_id)
         post_date = normalize_post_date(post.post_date)
-        parsed = parse_post_content(post.post_content, post_date, config)
+        parsed = parse_post_content(post.post_content, post_date, config, verbose=args.verbose)
         attach_source_metadata(parsed, post)
+        getattr(parsed, "refresh_ics_preview", lambda _timezone: "")(config.timezone)
         print(json.dumps(parsed.to_dict(include_ignored=True), ensure_ascii=False, indent=2))
         return 0
 
@@ -736,8 +738,42 @@ def main(argv: list[str] | None = None) -> int:
         if _debug_enabled(args):
             _print_debug_header(args.command, args.config, config, {"post_ids": [args.post_id]})
         try:
-            result = _export_post_to_ics_via_service(config, args.post_id, verbose=args.verbose)
-            public_result = {k: v for k, v in result.items() if k not in {"entries", "ignored_blocks"}}
+            post = fetch_post(config, args.post_id)
+            post_date = normalize_post_date(post.post_date)
+            parsed = parse_post_content(post.post_content, post_date, config, verbose=args.verbose)
+            attach_source_metadata(parsed, post)
+            getattr(parsed, "refresh_ics_preview", lambda _timezone: "")(config.timezone)
+            warnings = getattr(parsed, "warnings", [])
+            if warnings:
+                print(f"[WARN] Timeline warnings: {len(warnings)}")
+                for warn in warnings:
+                    print(f"[WARN] {warn.reason}: {warn.message}")
+            if not parsed.entries:
+                print("No valid timed log entries found in post.")
+                last_run_path, timestamped_path = write_recent_run_snapshot(
+                    error_dir=config.error_dir,
+                    command=args.command,
+                    success=False,
+                    config=config,
+                    summary={"post_id": post.post_id, "entry_count": 0},
+                    processed_post_ids=[post.post_id],
+                    error=RuntimeError("No valid timed log entries found in post."),
+                )
+                print(f"Debug report written to: {last_run_path}")
+                if timestamped_path is not None:
+                    print(f"Debug report written to: {timestamped_path}")
+                return 1
+            export_entries = _prepare_entries_for_export(parsed.entries, config.review_entry_export_mode)
+            out_path = write_post_ics(post, export_entries, config.output_dir, config.timezone)
+            result = {
+                "post_id": post.post_id,
+                "title": post.title,
+                "post_date": post.post_date,
+                "output_file": str(out_path),
+                "entry_count": len(export_entries),
+                "ignored_block_count": len(parsed.ignored_blocks),
+                "warning_count": len(warnings),
+            }
             _write_snapshot_best_effort(
                 error_dir=config.error_dir,
                 command=args.command,

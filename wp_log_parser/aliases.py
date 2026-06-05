@@ -14,10 +14,15 @@ def today_date_str(timezone_name: str) -> str:
         tz = ZoneInfo(timezone_name)
     except Exception as exc:
         raise ValueError(f"Invalid timezone: {timezone_name}") from exc
-    return datetime.now(tz).strftime("%Y-%m-%d")
+    return datetime.now(tz).date().isoformat()
 
 
 def find_today_ics_candidates(publish_dir: Path, today: str) -> list[Path]:
+    """Return today's ICS source candidates in deterministic selection order.
+
+    Candidates are ordered by local post date descending, then numeric post ID
+    descending, then filename ascending as the final stable tie-breaker.
+    """
     if not publish_dir.exists():
         raise FileNotFoundError(f"Publish directory not found: {publish_dir}")
     if not publish_dir.is_dir():
@@ -31,25 +36,34 @@ def find_today_ics_candidates(publish_dir: Path, today: str) -> list[Path]:
         m = ICS_FILE_RE.match(path.name)
         if m and m.group(1) == today:
             matches.append(path)
-    return sorted(matches, key=_candidate_sort_key, reverse=True)
+    return sorted(matches, key=_candidate_sort_key)
 
 
-def _candidate_sort_key(path: Path) -> tuple[str, int, str]:
+def _candidate_sort_key(path: Path) -> tuple[int, int, str]:
     match = ICS_FILE_RE.match(path.name)
     if match:
-        return match.group(1), int(match.group(2)), path.name
-    return "", -1, path.name
+        date_ordinal = datetime.fromisoformat(match.group(1)).date().toordinal()
+        return -date_ordinal, -int(match.group(2)), path.name
+    return 0, 0, path.name
+
+
+def _post_id_from_candidate(path: Path) -> int | None:
+    match = ICS_FILE_RE.match(path.name)
+    if not match:
+        return None
+    return int(match.group(2))
 
 
 def select_today_ics(candidates: list[Path], preferred_post_id: int | None = None) -> Path:
     if not candidates:
         raise FileNotFoundError("No ICS file found for today")
+    ordered = sorted(candidates, key=_candidate_sort_key)
     if preferred_post_id is not None:
-        for p in candidates:
-            m = ICS_FILE_RE.match(p.name)
-            if m and int(m.group(2)) == preferred_post_id:
-                return p
-    return candidates[0]
+        for path in ordered:
+            if _post_id_from_candidate(path) == preferred_post_id:
+                return path
+        raise FileNotFoundError(f"No ICS file found for today with post ID {preferred_post_id}")
+    return ordered[0]
 
 
 def select_today_ics_from_post_metadata(
@@ -59,10 +73,10 @@ def select_today_ics_from_post_metadata(
     if not candidates or not posts_metadata:
         return None
     candidate_map: dict[int, Path] = {}
-    for path in candidates:
-        match = ICS_FILE_RE.match(path.name)
-        if match:
-            candidate_map[int(match.group(2))] = path
+    for path in sorted(candidates, key=_candidate_sort_key):
+        post_id = _post_id_from_candidate(path)
+        if post_id is not None and post_id not in candidate_map:
+            candidate_map[post_id] = path
     if not candidate_map:
         return None
 

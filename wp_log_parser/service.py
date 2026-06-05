@@ -6,7 +6,6 @@ from zoneinfo import ZoneInfo
 
 from .config import AppConfig
 from .fetcher import PostData, fetch_post as fetch_post_data, fetch_today_post, normalize_post_date
-from .ics import generate_ics
 from .parser import parse_post_content
 from .source_metadata import attach_source_metadata
 from .wordpress import (
@@ -73,6 +72,5 @@ def run_today_pipeline(config: AppConfig) -> dict[str, Any]:
     post = fetch_today_post(config)
     parsed = parse_post_content(post.post_content, normalize_post_date(post.post_date), config)
     attach_source_metadata(parsed, post)
-    payload = parsed.to_dict(include_ignored=config.save_ignored_blocks)
-    payload["ics_preview"] = generate_ics(payload["entries"], timezone=config.timezone)
-    return payload
+    getattr(parsed, "refresh_ics_preview", lambda _timezone: "")(config.timezone)
+    return parsed.to_dict(include_ignored=config.save_ignored_blocks)
