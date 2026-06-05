@@ -18,6 +18,8 @@ from .validators import (
 )
 
 
+validate_output_dir = validate_output_dir_writable
+
 def mask_secret(value: str) -> str:
     if not value:
         return ""

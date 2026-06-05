@@ -196,3 +196,32 @@ def test_explicit_overlap_is_detected_under_warn_policy() -> None:
     timeline_entries, warnings = apply_timeline(entries, AppConfig(overlap_policy="warn", auto_cross_midnight=False))
     assert any(item.reason == "overlap" for item in warnings)
     assert timeline_entries[0].status == "ready"
+
+
+def test_range_entry_end_time_is_not_overwritten_by_next_entry_inference() -> None:
+    entries = [
+        LogEntry(date="2026-04-11", start_time="18:00", end_time="18:23", summary="Dinner", raw="", status="needs_review"),
+        LogEntry(date="2026-04-11", start_time="18:40", end_time=None, summary="Cleanup", raw="", status="needs_review"),
+    ]
+
+    timeline_entries, _warnings = apply_timeline(entries, AppConfig(default_last_event_minutes=0))
+
+    assert timeline_entries[0].end_time == "18:23"
+    assert timeline_entries[0].status == "ready"
+    assert timeline_entries[1].status == "needs_review"
+
+
+def test_last_point_status_with_and_without_fallback_duration() -> None:
+    no_fallback, _warnings = apply_timeline(
+        [LogEntry(date="2026-04-11", start_time="10:00", end_time=None, summary="Open", raw="", status="needs_review")],
+        AppConfig(default_last_event_minutes=0),
+    )
+    with_fallback, _warnings = apply_timeline(
+        [LogEntry(date="2026-04-11", start_time="10:00", end_time=None, summary="Open", raw="", status="needs_review")],
+        AppConfig(default_last_event_minutes=15),
+    )
+
+    assert no_fallback[0].end_time is None
+    assert no_fallback[0].status == "needs_review"
+    assert with_fallback[0].end_time == "10:15"
+    assert with_fallback[0].status == "ready"

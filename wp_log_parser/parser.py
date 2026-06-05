@@ -23,6 +23,20 @@ def parse_post_content(
     entries: list[LogEntry] = []
     ignored_blocks: list[IgnoredBlock] = []
 
+    def _should_append_unmatched() -> bool:
+        return getattr(config, "unmatched_line_policy", "ignore") == "append_to_previous"
+
+    def _append_to_previous(raw_html: str, visible: str) -> bool:
+        if not entries or not _should_append_unmatched():
+            return False
+        addition = visible.strip()
+        if not addition:
+            return False
+        previous = entries[-1]
+        previous.summary = f"{previous.summary} {addition}".strip()
+        previous.raw = f"{previous.raw}\n{raw_html}" if previous.raw else raw_html
+        return True
+
     def _append_parsed_entry(index: int, raw_html: str, visible: str) -> None:
         nonlocal entries, ignored_blocks
         visible = visible.strip()
@@ -41,6 +55,10 @@ def parse_post_content(
 
         parsed_line = parse_log_line(visible, config, custom_patterns)
         if parsed_line is None:
+            if _append_to_previous(raw_html, visible):
+                if verbose:
+                    print(f"[DEBUG] Appended unmatched paragraph #{index} to previous entry")
+                return
             ignored_blocks.append(
                 IgnoredBlock(
                     index=index,
@@ -102,7 +120,7 @@ def parse_post_content(
                         index=block.index,
                         type=f"wp:{block_type}",
                         reason="unsupported_block_type",
-                        raw=block.raw_paragraph_html or "",
+                        raw=block.raw_content or block.raw_paragraph_html or "",
                     )
                 )
                 if verbose:
@@ -118,9 +136,11 @@ def parse_post_content(
         for warn in warnings:
             print(f"[WARN] {warn.message}")
 
-    return ParsedPost(
+    parsed = ParsedPost(
         post_date=post_date,
         entries=entries,
         ignored_blocks=ignored_blocks,
         warnings=warnings,
     )
+    parsed.refresh_ics_preview(config.timezone)
+    return parsed
