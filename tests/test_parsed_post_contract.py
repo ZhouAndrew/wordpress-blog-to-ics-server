@@ -184,3 +184,41 @@ def test_export_ics_command_path_still_generates_ics(monkeypatch, tmp_path: Path
 
     assert exit_code == 0
     assert "BEGIN:VCALENDAR" in output
+
+
+def test_parsed_post_to_dict_default_contract_includes_entries_ignored_blocks_and_ics_preview() -> None:
+    from wp_log_parser.parser import parse_post_content
+
+    post_content = "\n".join(
+        [
+            "<!-- wp:paragraph -->",
+            "<p>07:45 Breakfast</p>",
+            "<!-- /wp:paragraph -->",
+            "<!-- wp:image -->",
+            "<figure><img src=\"x.jpg\" /></figure>",
+            "<!-- /wp:image -->",
+            "<!-- wp:paragraph -->",
+            "<p>08:00 Work</p>",
+            "<!-- /wp:paragraph -->",
+        ]
+    )
+
+    payload = parse_post_content(post_content, "2026-04-11", AppConfig(default_last_event_minutes=0)).to_dict()
+
+    assert set(["entries", "ignored_blocks", "ics_preview"]).issubset(payload)
+    assert payload["entries"][0] == {
+        "date": "2026-04-11",
+        "start_time": "07:45",
+        "end_time": "08:00",
+        "start_dt": "2026-04-11T07:45:00",
+        "end_dt": "2026-04-11T08:00:00",
+        "summary": "Breakfast",
+        "raw": "<p>07:45 Breakfast</p>",
+        "status": "ready",
+        "source_id": None,
+    }
+    assert payload["entries"][1]["status"] == "needs_review"
+    assert payload["ignored_blocks"][0]["type"] == "wp:image"
+    assert payload["ignored_blocks"][0]["reason"] == "unsupported_block_type"
+    assert "BEGIN:VCALENDAR" in payload["ics_preview"]
+    assert "SUMMARY:Breakfast" in payload["ics_preview"]

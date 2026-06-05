@@ -290,6 +290,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_parse.add_argument("--config", default="./config.json")
     p_parse.add_argument("--post-id", type=int)
     p_parse.add_argument("--select-post-id", action="store_true", help="Interactively select a post ID from recent posts.")
+    p_parse.add_argument("--verbose", action="store_true")
 
     p_export = sub.add_parser("export-ics")
     p_export.add_argument("--config", default="./config.json")
@@ -633,8 +634,9 @@ def main(argv: list[str] | None = None) -> int:
             post_id = select_post_id(config)
         post = fetch_post(config, post_id)
         post_date = normalize_post_date(post.post_date)
-        parsed = parse_post_content(post.post_content, post_date, config)
+        parsed = parse_post_content(post.post_content, post_date, config, verbose=args.verbose)
         attach_source_metadata(parsed, post)
+        getattr(parsed, "refresh_ics_preview", lambda _timezone: "")(config.timezone)
         print(json.dumps(parsed.to_dict(include_ignored=True), ensure_ascii=False, indent=2))
         return 0
 
@@ -720,6 +722,7 @@ def main(argv: list[str] | None = None) -> int:
             post_date = normalize_post_date(post.post_date)
             parsed = parse_post_content(post.post_content, post_date, config, verbose=args.verbose)
             attach_source_metadata(parsed, post)
+            getattr(parsed, "refresh_ics_preview", lambda _timezone: "")(config.timezone)
             warnings = getattr(parsed, "warnings", [])
             if warnings:
                 print(f"[WARN] Timeline warnings: {len(warnings)}")

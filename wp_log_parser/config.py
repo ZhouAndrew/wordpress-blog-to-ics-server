@@ -30,6 +30,7 @@ class AppConfig:
     allow_empty_summary: bool = False
     auto_cross_midnight: bool = True
     save_ignored_blocks: bool = True
+    unmatched_line_policy: str = "ignore"
     custom_parsing_patterns: list[dict[str, Any] | str] = field(default_factory=list)
     overlap_policy: str = "needs_review"
     review_entry_export_mode: str = "include"
