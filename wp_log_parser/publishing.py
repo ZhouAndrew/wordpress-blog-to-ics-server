@@ -74,10 +74,14 @@ def publish_recent(config: AppConfig, days: int, verbose: bool = False) -> dict[
     today_source = None
     if items:
         try:
+            today = today_date_str(config.timezone)
+            today_candidates = find_today_ics_candidates(Path(config.output_dir), today)
+            selected_today = select_today_ics(today_candidates)
             generate_today_ics(config.output_dir, config.timezone)
-            today_candidates = find_today_ics_candidates(Path(config.output_dir), today_date_str(config.timezone))
-            today_source = select_today_ics(today_candidates).name
+            today_source = selected_today.name
             today_refreshed = True
+            if verbose:
+                print(f"[OK] Selected today source: {today_source}")
         except Exception as exc:
             if verbose:
                 print(f"[WARN] Could not refresh today.ics automatically: {exc}")

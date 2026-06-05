@@ -95,11 +95,14 @@ def publish_once(config: AppConfig, days: int, verbose: bool = False) -> dict[st
     today_source = None
     if items:
         try:
+            today = today_date_str(config.timezone)
+            today_candidates = find_today_ics_candidates(Path(config.output_dir), today)
+            selected_today = select_today_ics(today_candidates)
             today_target = generate_today_ics(config.output_dir, config.timezone)
-            today_candidates = find_today_ics_candidates(Path(config.output_dir), today_date_str(config.timezone))
-            today_source = select_today_ics(today_candidates).name
+            today_source = selected_today.name
             today_refreshed = True
             if verbose:
+                print(f"[OK] Selected today source: {today_source}")
                 print(f"[OK] Refreshed today alias: {today_target.name}")
         except Exception as exc:
             if verbose:
