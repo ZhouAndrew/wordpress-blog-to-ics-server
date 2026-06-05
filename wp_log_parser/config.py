@@ -30,6 +30,7 @@ class AppConfig:
     allow_empty_summary: bool = False
     auto_cross_midnight: bool = True
     save_ignored_blocks: bool = True
+    unmatched_line_policy: str = "ignore"
     custom_parsing_patterns: list[dict[str, Any] | str] = field(default_factory=list)
     overlap_policy: str = "needs_review"
     review_entry_export_mode: str = "include"
@@ -76,6 +77,12 @@ def load_config(path: str) -> AppConfig:
         raise ConfigError("overlap_policy must be 'warn', 'needs_review', or 'error'")
     if data["review_entry_export_mode"] not in {"include", "skip", "error"}:
         raise ConfigError("review_entry_export_mode must be 'include', 'skip', or 'error'")
+    if data.pop("append_unmatched_to_previous_entry", False) is True:
+        data["unmatched_line_policy"] = "append_to_previous"
+    if data.pop("append_unmatched_lines", False) is True:
+        data["unmatched_line_policy"] = "append_to_previous"
+    if data["unmatched_line_policy"] not in {"ignore", "append_to_previous"}:
+        raise ConfigError("unmatched_line_policy must be 'ignore' or 'append_to_previous'")
 
     try:
         data["default_last_event_minutes"] = int(data["default_last_event_minutes"])

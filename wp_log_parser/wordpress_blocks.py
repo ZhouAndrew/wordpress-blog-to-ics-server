@@ -11,6 +11,7 @@ class WordPressBlock:
     block_type: str
     raw_paragraph_html: str | None
     visible_text: str
+    raw_content: str = ""
 
 
 def iter_blocks(post_content: str) -> list[WordPressBlock]:
@@ -24,6 +25,7 @@ def iter_blocks(post_content: str) -> list[WordPressBlock]:
                 block_type=block_type,
                 raw_paragraph_html=raw_p,
                 visible_text=visible,
+                raw_content=block_body.strip(),
             )
         )
     return blocks

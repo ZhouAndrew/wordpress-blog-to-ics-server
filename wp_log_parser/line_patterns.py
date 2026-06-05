@@ -32,9 +32,10 @@ class CustomPattern:
 
 def _normalize_time(hour: str, minute: str) -> str | None:
     h = int(hour)
-    if h < 0 or h > 23:
+    m = int(minute)
+    if h < 0 or h > 23 or m < 0 or m > 59:
         return None
-    return f"{h:02d}:{minute}"
+    return f"{h:02d}:{m:02d}"
 
 
 def _normalize_hhmm(value: str | None) -> str | None:
