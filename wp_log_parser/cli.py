@@ -779,13 +779,13 @@ def main(argv: list[str] | None = None) -> int:
                 command=args.command,
                 success=True,
                 config=config,
-                summary=public_result,
+                summary=result,
                 processed_post_ids=[int(result["post_id"])],
             )
             if _debug_enabled(args):
                 print(f"[DEBUG] processed_post_ids: {[int(result['post_id'])]}")
                 print(f"[DEBUG] event_count: {len(result.get('entries', []))}")
-            print(json.dumps(public_result, ensure_ascii=False, indent=2))
+            print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
         except Exception as exc:
             if _debug_enabled(args):
