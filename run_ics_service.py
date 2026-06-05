@@ -1,118 +1,44 @@
 #!/usr/bin/env python3
+"""Compatibility wrapper for the package ICS publishing service."""
+from __future__ import annotations
+
 import argparse
-import subprocess
+import json
 import sys
-import threading
-import time
-from datetime import datetime
+from dataclasses import replace
+
+from wp_log_parser.config import load_config
+from wp_log_parser.service import publish_once, run_service_loop
 
 
-class Logger:
-    def __init__(self, verbose: bool = False) -> None:
-        self.verbose = verbose
-
-    def _ts(self) -> str:
-        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    def info(self, msg: str) -> None:
-        print(f"[{self._ts()}] [INFO] {msg}")
-
-    def ok(self, msg: str) -> None:
-        print(f"[{self._ts()}] [OK] {msg}")
-
-    def error(self, msg: str) -> None:
-        print(f"[{self._ts()}] [ERROR] {msg}", file=sys.stderr)
-
-
-def run_publish_server(cmd: list[str], log: Logger) -> None:
-    log.info("Starting publish_ics_server")
-    subprocess.run(cmd)
-
-
-def run_today_updater(
-    cmd: list[str],
-    interval: int,
-    log: Logger,
-) -> None:
-    log.info("Starting today.ics updater loop")
-    while True:
-        try:
-            log.info("Updating today.ics")
-            subprocess.run(cmd, check=True)
-            log.ok("today.ics updated")
-        except subprocess.CalledProcessError as e:
-            log.error(f"today.ics update failed: {e}")
-
-        time.sleep(interval)
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Run full ICS service (publisher + today.ics updater)"
-    )
-
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Run the WordPress log ICS publishing service.")
     parser.add_argument("--config", default="./config.json")
-    parser.add_argument("--publish-dir", default="./published_ics")
+    parser.add_argument("--publish-dir", default=None, help="Published ICS directory; overrides config.output_dir")
     parser.add_argument("--interval", type=int, default=60)
     parser.add_argument("--days", type=int, default=7)
+    parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=5333)
+    parser.add_argument("--once", action="store_true", help="Run one publish cycle without starting the HTTP server")
     parser.add_argument("--verbose", action="store_true")
-
-    args = parser.parse_args()
-    log = Logger(verbose=args.verbose)
-
-    log.info("Starting full ICS service")
-
-    # --- command: publish server ---
-    publish_cmd = [
-        sys.executable,
-        "publish_ics_server.py",
-        "--config", args.config,
-        "--publish-dir", args.publish_dir,
-        "--interval", str(args.interval),
-        "--days", str(args.days),
-        "--port", str(args.port),
-    ]
-    if args.verbose:
-        publish_cmd.append("--verbose")
-
-    # --- command: today updater ---
-    today_cmd = [
-        sys.executable,
-        "update_today_ics.py",
-        "--config", args.config,
-        "--publish-dir", args.publish_dir,
-        "--mode", "copy",
-    ]
-    if args.verbose:
-        today_cmd.append("--verbose")
-
-    # --- thread 1: publisher (includes HTTP server) ---
-    t1 = threading.Thread(
-        target=run_publish_server,
-        args=(publish_cmd, log),
-        daemon=True,
-    )
-
-    # --- thread 2: today updater ---
-    t2 = threading.Thread(
-        target=run_today_updater,
-        args=(today_cmd, args.interval, log),
-        daemon=True,
-    )
-
-    t1.start()
-    time.sleep(2)  # give server a bit time
-    t2.start()
-
-    log.ok("All services started")
+    args = parser.parse_args(argv)
 
     try:
-        while True:
-            time.sleep(3600)
-    except KeyboardInterrupt:
-        log.info("Shutting down")
+        config = load_config(args.config)
+        if args.publish_dir:
+            config = replace(config, output_dir=args.publish_dir)
+        if args.once:
+            result = publish_once(config, days=args.days, verbose=args.verbose)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        else:
+            run_service_loop(config, days=args.days, interval_seconds=args.interval, host=args.host, port=args.port, verbose=args.verbose)
         return 0
+    except KeyboardInterrupt:
+        print("[INFO] Service interrupted. Shutting down cleanly.")
+        return 0
+    except Exception as exc:
+        print(f"[ERROR] {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

@@ -277,7 +277,14 @@ python -m wp_log_parser run-ics-service --config ./config.json
 python -m wp_log_parser run-ics-service --config ./config.json --days 7 --interval 300 --host 127.0.0.1 --port 5333
 ```
 
-Service mode periodically publishes recent posts and serves `output_dir` over HTTP. Open:
+
+Run a single publish cycle without starting the HTTP server:
+
+```bash
+python -m wp_log_parser run-ics-service --config ./config.json --days 7 --once
+```
+
+
 
 - `http://127.0.0.1:5333/index.html`
 - `http://127.0.0.1:5333/today.ics`
@@ -436,8 +443,8 @@ python -m wp_log_parser <command> ...
 - `run-today` – fetch today’s post and run the today pipeline
 - `post-to-ics` – fetch + parse + export one explicit post to ICS
 - `publish-ics` – generate ICS files for recent posts and index artifacts
-- `update-today-ics` – create/update `today.ics` alias from existing local files
-- `run-ics-service` – periodic publish + static HTTP server
+- `update-today-ics` – create/update `today.ics` alias
+- `run-ics-service` – periodic publish + static HTTP server; add `--once` for a single publish cycle
 - `sync-caldav` – incremental event-level CalDAV synchronization
 - `doctor` – environment/config diagnostics
 - `config` – get/set/edit local config values
