@@ -4,13 +4,19 @@ from __future__ import annotations
 
 import json
 
+from wp_log_parser.config import AppConfig
 from wp_log_parser.ics import generate_ics
 from wp_log_parser.parser import parse_post_content as _parse_post_content
 
 
-def parse_post_content(post_content: str, post_date: str = "2026-04-11") -> dict:
+def parse_post_content(
+    post_content: str,
+    post_date: str = "2026-04-11",
+    config: AppConfig | None = None,
+) -> dict:
     """Parse sample post content through the package parser and return the public contract."""
-    parsed = _parse_post_content(post_content, post_date)
+    app_config = config or AppConfig()
+    parsed = _parse_post_content(post_content, post_date, app_config)
     payload = parsed.to_dict(include_ignored=True)
     payload["ics_preview"] = generate_ics(payload["entries"])
     return payload
