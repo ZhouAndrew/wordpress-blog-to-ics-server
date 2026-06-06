@@ -18,6 +18,11 @@ from .validators import (
 )
 
 
+def validate_output_dir_writable(path: str):
+    """Backward-compatible setup-wizard validation hook for tests and callers."""
+    return validate_output_dir(path)
+
+
 def mask_secret(value: str) -> str:
     if not value:
         return ""

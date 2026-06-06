@@ -18,7 +18,7 @@ from .aliases import (
     today_date_str,
 )
 from .config import config_exists, create_default_config, load_config, save_config
-from .exceptions import ConfigError
+from .exceptions import ConfigError, NoValidLogEntriesError
 from .debug_report import sanitize_config, write_recent_run_snapshot
 from .fetcher import fetch_post, normalize_post_date
 from .health import run_health_check
@@ -738,43 +738,16 @@ def main(argv: list[str] | None = None) -> int:
         if _debug_enabled(args):
             _print_debug_header(args.command, args.config, config, {"post_ids": [args.post_id]})
         try:
-            post = fetch_post(config, args.post_id)
-            post_date = normalize_post_date(post.post_date)
-            parsed = parse_post_content(post.post_content, post_date, config, verbose=args.verbose)
-            attach_source_metadata(parsed, post)
-            getattr(parsed, "refresh_ics_preview", lambda _timezone: "")(config.timezone)
-            warnings = getattr(parsed, "warnings", [])
-            if warnings:
-                print(f"[WARN] Timeline warnings: {len(warnings)}")
-                for warn in warnings:
-                    print(f"[WARN] {warn.reason}: {warn.message}")
-            if not parsed.entries:
-                print("No valid timed log entries found in post.")
-                last_run_path, timestamped_path = write_recent_run_snapshot(
-                    error_dir=config.error_dir,
-                    command=args.command,
-                    success=False,
-                    config=config,
-                    summary={"post_id": post.post_id, "entry_count": 0},
-                    processed_post_ids=[post.post_id],
-                    error=RuntimeError("No valid timed log entries found in post."),
-                )
-                print(f"Debug report written to: {last_run_path}")
-                if timestamped_path is not None:
-                    print(f"Debug report written to: {timestamped_path}")
-                return 1
-            export_entries = _prepare_entries_for_export(parsed.entries, config.review_entry_export_mode)
-            out_path = write_post_ics(post, export_entries, config.output_dir, config.timezone)
+            service_result = _export_post_to_ics_via_service(config, args.post_id, verbose=args.verbose)
             result = {
-                "post_id": post.post_id,
-                "title": post.title,
-                "post_date": post.post_date,
-                "output_file": str(out_path),
-                "entry_count": len(export_entries),
-                "ignored_block_count": len(parsed.ignored_blocks),
-                "warning_count": len(warnings),
+                "post_id": service_result["post_id"],
+                "title": service_result["title"],
+                "post_date": service_result["post_date"],
+                "output_file": service_result["output_file"],
+                "entry_count": service_result["entry_count"],
+                "ignored_block_count": service_result["ignored_block_count"],
+                "warning_count": service_result["warning_count"],
             }
-            public_result = {k: v for k, v in result.items() if k not in {"entries", "ignored_blocks"}}
             _write_snapshot_best_effort(
                 error_dir=config.error_dir,
                 command=args.command,
@@ -785,10 +758,28 @@ def main(argv: list[str] | None = None) -> int:
             )
             if _debug_enabled(args):
                 print(f"[DEBUG] processed_post_ids: {[int(result['post_id'])]}")
-                print(f"[DEBUG] event_count: {len(result.get('entries', []))}")
+                print(f"[DEBUG] event_count: {service_result.get('entry_count', 0)}")
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
         except Exception as exc:
+            if isinstance(exc, NoValidLogEntriesError):
+                print(str(exc))
+                try:
+                    last_run_path, timestamped_path = write_recent_run_snapshot(
+                        error_dir=config.error_dir,
+                        command=args.command,
+                        success=False,
+                        config=config,
+                        summary={"post_id": args.post_id, "entry_count": 0},
+                        processed_post_ids=[args.post_id],
+                        error=exc,
+                    )
+                    print(f"Debug report written to: {last_run_path}")
+                    if timestamped_path is not None:
+                        print(f"Debug report written to: {timestamped_path}")
+                except Exception as snapshot_exc:
+                    print(f"[WARN] Failed to write debug report: {snapshot_exc}")
+                return 1
             if _debug_enabled(args):
                 print("".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
             try:
