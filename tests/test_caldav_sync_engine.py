@@ -4,10 +4,10 @@ from wp_log_parser.config import AppConfig
 from wp_log_parser.fetcher import PostData
 from wp_log_parser.ics import generate_ics
 from wp_log_parser.parser import parse_post_content
+from wp_log_parser.caldav_service import list_caldav_post_metadata
 from wp_log_parser.sync.caldav_sync import (
     CalDAVTransport,
     SyncIndex,
-    _list_post_metadata,
     run_caldav_sync,
     sync_caldav_once,
 )
@@ -56,8 +56,8 @@ def test_local_ics_and_caldav_sync_render_same_utc_instant(tmp_path, monkeypatch
             status="publish",
         )
 
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync._list_post_metadata", list_meta)
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync.fetch_post", fetch)
+    monkeypatch.setattr("wp_log_parser.caldav_service.list_caldav_post_metadata", list_meta)
+    monkeypatch.setattr("wp_log_parser.caldav_service.fetch_post", fetch)
 
     parsed = parse_post_content(post_content, "2026-04-11", config)
     local_ics = generate_ics(parsed.entries, timezone=config.timezone)
@@ -89,8 +89,8 @@ def test_sync_twice_without_changes_is_noop(tmp_path, monkeypatch) -> None:
             status="publish",
         )
 
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync._list_post_metadata", list_meta)
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync.fetch_post", fetch)
+    monkeypatch.setattr("wp_log_parser.caldav_service.list_caldav_post_metadata", list_meta)
+    monkeypatch.setattr("wp_log_parser.caldav_service.fetch_post", fetch)
 
     first = sync_caldav_once(config, index_path=idx_path, uid_domain="example.com", transport=transport)
     second = sync_caldav_once(config, index_path=idx_path, uid_domain="example.com", transport=transport)
@@ -124,8 +124,8 @@ def test_modified_post_updates_and_deletes_removed_entries(tmp_path, monkeypatch
             status="publish",
         )
 
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync._list_post_metadata", list_meta)
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync.fetch_post", fetch)
+    monkeypatch.setattr("wp_log_parser.caldav_service.list_caldav_post_metadata", list_meta)
+    monkeypatch.setattr("wp_log_parser.caldav_service.fetch_post", fetch)
 
     first = sync_caldav_once(config, index_path=idx_path, uid_domain="example.com", transport=transport)
 
@@ -160,8 +160,8 @@ def test_inserted_middle_entry_does_not_rewrite_unrelated_later_uids(tmp_path, m
             status="publish",
         )
 
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync._list_post_metadata", list_meta)
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync.fetch_post", fetch)
+    monkeypatch.setattr("wp_log_parser.caldav_service.list_caldav_post_metadata", list_meta)
+    monkeypatch.setattr("wp_log_parser.caldav_service.fetch_post", fetch)
 
     first = sync_caldav_once(config, index_path=idx_path, uid_domain="example.com", transport=transport)
     index_first = SyncIndex.load(idx_path)
@@ -197,8 +197,8 @@ def test_dry_run_reports_changes_without_writing_index(tmp_path, monkeypatch) ->
             status="publish",
         )
 
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync._list_post_metadata", list_meta)
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync.fetch_post", fetch)
+    monkeypatch.setattr("wp_log_parser.caldav_service.list_caldav_post_metadata", list_meta)
+    monkeypatch.setattr("wp_log_parser.caldav_service.fetch_post", fetch)
 
     result = sync_caldav_once(config, index_path=idx_path, uid_domain="example.com", transport=transport, dry_run=True)
 
@@ -219,9 +219,9 @@ def test_metadata_listing_uses_pagination(monkeypatch) -> None:
             return [{"id": 1, "date": "2026-01-01 00:00:00", "modified_gmt": "2026-01-01 00:00:00"}]
         return []
 
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync.list_posts_wpcli", list_wpcli)
+    monkeypatch.setattr("wp_log_parser.caldav_service.list_posts_wpcli", list_wpcli)
 
-    rows = _list_post_metadata(config)
+    rows = list_caldav_post_metadata(config)
     assert len(rows) == 1
     assert rows[0]["id"] == 1
 
@@ -245,8 +245,8 @@ def test_changed_start_time_results_in_delete_and_create(tmp_path, monkeypatch) 
             status="publish",
         )
 
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync._list_post_metadata", list_meta)
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync.fetch_post", fetch)
+    monkeypatch.setattr("wp_log_parser.caldav_service.list_caldav_post_metadata", list_meta)
+    monkeypatch.setattr("wp_log_parser.caldav_service.fetch_post", fetch)
 
     first = sync_caldav_once(config, index_path=idx_path, uid_domain="example.com", transport=transport)
     state["modified"] = "2026-04-02 10:00:00"
@@ -308,8 +308,8 @@ def test_cancel_mode_puts_cancelled_instead_of_delete(tmp_path, monkeypatch) -> 
             status="publish",
         )
 
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync._list_post_metadata", list_meta)
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync.fetch_post", fetch)
+    monkeypatch.setattr("wp_log_parser.caldav_service.list_caldav_post_metadata", list_meta)
+    monkeypatch.setattr("wp_log_parser.caldav_service.fetch_post", fetch)
 
     first = sync_caldav_once(config, index_path=idx_path, uid_domain="example.com", transport=transport)
     state["modified"] = "2026-04-02 10:00:00"
@@ -349,8 +349,8 @@ def test_cancelled_uid_can_be_restored_with_same_resource_and_incremented_sequen
             status="publish",
         )
 
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync._list_post_metadata", list_meta)
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync.fetch_post", fetch)
+    monkeypatch.setattr("wp_log_parser.caldav_service.list_caldav_post_metadata", list_meta)
+    monkeypatch.setattr("wp_log_parser.caldav_service.fetch_post", fetch)
 
     sync_caldav_once(config, index_path=idx_path, uid_domain="example.com", transport=transport)
 
@@ -396,8 +396,8 @@ def test_cancelled_tombstone_persists_across_unrelated_post_change(tmp_path, mon
             status="publish",
         )
 
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync._list_post_metadata", list_meta)
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync.fetch_post", fetch)
+    monkeypatch.setattr("wp_log_parser.caldav_service.list_caldav_post_metadata", list_meta)
+    monkeypatch.setattr("wp_log_parser.caldav_service.fetch_post", fetch)
 
     sync_caldav_once(config, index_path=idx_path, uid_domain="example.com", transport=transport)
     state["modified"] = "2026-04-02 10:00:00"
@@ -466,8 +466,8 @@ def test_cancel_mode_missing_index_fields_is_counted_as_skipped(tmp_path, monkey
             status="publish",
         )
 
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync._list_post_metadata", list_meta)
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync.fetch_post", fetch)
+    monkeypatch.setattr("wp_log_parser.caldav_service.list_caldav_post_metadata", list_meta)
+    monkeypatch.setattr("wp_log_parser.caldav_service.fetch_post", fetch)
 
     result = sync_caldav_once(config, index_path=idx_path, uid_domain="example.com", transport=transport)
     assert result["cancelled"] == 0
@@ -494,8 +494,8 @@ def test_debug_events_capture_create_cancel_restore_and_skip(tmp_path, monkeypat
             status="publish",
         )
 
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync._list_post_metadata", list_meta)
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync.fetch_post", fetch)
+    monkeypatch.setattr("wp_log_parser.caldav_service.list_caldav_post_metadata", list_meta)
+    monkeypatch.setattr("wp_log_parser.caldav_service.fetch_post", fetch)
 
     sync_caldav_once(config, index_path=idx_path, uid_domain="example.com", transport=transport, debug_events=debug_events)
     state["modified"] = "2026-04-02 10:00:00"
@@ -548,8 +548,8 @@ def test_changed_event_increments_sequence_and_active_event_has_sequence(tmp_pat
             status="publish",
         )
 
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync._list_post_metadata", list_meta)
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync.fetch_post", fetch)
+    monkeypatch.setattr("wp_log_parser.caldav_service.list_caldav_post_metadata", list_meta)
+    monkeypatch.setattr("wp_log_parser.caldav_service.fetch_post", fetch)
 
     sync_caldav_once(config, index_path=idx_path, uid_domain="example.com", transport=transport)
     first_payload = transport.put_payloads["wp-10-20260401T074500Z-1@example.com.ics"]
@@ -587,8 +587,8 @@ def test_cancel_mode_is_idempotent_on_second_run(tmp_path, monkeypatch) -> None:
             status="publish",
         )
 
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync._list_post_metadata", list_meta)
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync.fetch_post", fetch)
+    monkeypatch.setattr("wp_log_parser.caldav_service.list_caldav_post_metadata", list_meta)
+    monkeypatch.setattr("wp_log_parser.caldav_service.fetch_post", fetch)
 
     sync_caldav_once(config, index_path=idx_path, uid_domain="example.com", transport=transport)
     state["modified"] = "2026-04-02 10:00:00"
@@ -624,8 +624,8 @@ def test_cancel_mode_whole_post_removal_is_idempotent(tmp_path, monkeypatch) -> 
             status="publish",
         )
 
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync._list_post_metadata", list_meta)
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync.fetch_post", fetch)
+    monkeypatch.setattr("wp_log_parser.caldav_service.list_caldav_post_metadata", list_meta)
+    monkeypatch.setattr("wp_log_parser.caldav_service.fetch_post", fetch)
 
     first = sync_caldav_once(config, index_path=idx_path, uid_domain="example.com", transport=transport)
     assert first["created"] == 2
@@ -669,8 +669,8 @@ def test_cancel_mode_removed_event_dry_run_does_not_write_transport_or_index(tmp
             status="publish",
         )
 
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync._list_post_metadata", list_meta)
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync.fetch_post", fetch)
+    monkeypatch.setattr("wp_log_parser.caldav_service.list_caldav_post_metadata", list_meta)
+    monkeypatch.setattr("wp_log_parser.caldav_service.fetch_post", fetch)
 
     sync_caldav_once(config, index_path=idx_path, uid_domain="example.com", transport=setup_transport)
     before = idx_path.read_text(encoding="utf-8")
@@ -704,8 +704,8 @@ def test_cancel_mode_restore_dry_run_does_not_write_transport_or_index(tmp_path,
             status="publish",
         )
 
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync._list_post_metadata", list_meta)
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync.fetch_post", fetch)
+    monkeypatch.setattr("wp_log_parser.caldav_service.list_caldav_post_metadata", list_meta)
+    monkeypatch.setattr("wp_log_parser.caldav_service.fetch_post", fetch)
 
     sync_caldav_once(config, index_path=idx_path, uid_domain="example.com", transport=setup_transport)
     state["modified"] = "2026-04-02 10:00:00"
@@ -743,8 +743,8 @@ def test_cancel_mode_stale_post_removal_dry_run_does_not_write_transport_or_inde
             status="publish",
         )
 
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync._list_post_metadata", list_meta)
-    monkeypatch.setattr("wp_log_parser.sync.caldav_sync.fetch_post", fetch)
+    monkeypatch.setattr("wp_log_parser.caldav_service.list_caldav_post_metadata", list_meta)
+    monkeypatch.setattr("wp_log_parser.caldav_service.fetch_post", fetch)
 
     sync_caldav_once(config, index_path=idx_path, uid_domain="example.com", transport=setup_transport)
     before = idx_path.read_text(encoding="utf-8")
