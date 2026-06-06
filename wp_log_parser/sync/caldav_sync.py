@@ -4,19 +4,18 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
 
 from ..config import AppConfig
-from ..fetcher import fetch_post, normalize_post_date
-from ..ics import generate_single_event_ics, to_utc_datetime
-from ..parser import parse_post_content
-from ..source_metadata import attach_source_metadata
-from ..wordpress import list_post_metadata_paginated, list_posts_rest, list_posts_wpcli
+from ..caldav_exporter import (
+    render_cancelled_event_payload,
+    render_confirmed_event_payload,
+    vevent_resource,
+)
+from ..caldav_service import build_caldav_sync_batch
 
 
 @dataclass
@@ -78,9 +77,13 @@ class SyncIndex:
             events[event_uid] = EventSyncState(
                 uid=str(data.get("uid", event_uid)),
                 post_id=post_id,
-                resource_path=str(data.get("resource_path", _vevent_resource(event_uid))),
+                resource_path=str(
+                    data.get("resource_path", vevent_resource(event_uid))
+                ),
                 start_utc=str(data.get("start_utc", "")),
-                end_utc=str(data["end_utc"]) if data.get("end_utc") is not None else None,
+                end_utc=(
+                    str(data["end_utc"]) if data.get("end_utc") is not None else None
+                ),
                 summary=str(data.get("summary", "")),
                 hash=str(data.get("hash", "")),
                 sequence=sequence,
@@ -118,11 +121,15 @@ class SyncIndex:
                 for uid, state in self.events.items()
             },
         }
-        idx_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        idx_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
 
 
 class CalDAVTransport:
-    def put(self, resource_path: str, ics_payload: str) -> None:  # pragma: no cover - interface
+    def put(
+        self, resource_path: str, ics_payload: str
+    ) -> None:  # pragma: no cover - interface
         raise NotImplementedError
 
     def delete(self, resource_path: str) -> None:  # pragma: no cover - interface
@@ -130,7 +137,9 @@ class CalDAVTransport:
 
 
 class RequestsCalDAVTransport(CalDAVTransport):
-    def __init__(self, base_url: str, username: str, password: str, verify_ssl: bool = True) -> None:
+    def __init__(
+        self, base_url: str, username: str, password: str, verify_ssl: bool = True
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.username = username
         self.password = password
@@ -151,7 +160,9 @@ class RequestsCalDAVTransport(CalDAVTransport):
             timeout=20,
         )
         if response.status_code not in {200, 201, 204}:
-            raise RuntimeError(f"CalDAV PUT failed for {resource_path}: HTTP {response.status_code}")
+            raise RuntimeError(
+                f"CalDAV PUT failed for {resource_path}: HTTP {response.status_code}"
+            )
 
     def delete(self, resource_path: str) -> None:
         import requests
@@ -163,7 +174,9 @@ class RequestsCalDAVTransport(CalDAVTransport):
             timeout=20,
         )
         if response.status_code not in {200, 204, 404}:
-            raise RuntimeError(f"CalDAV DELETE failed for {resource_path}: HTTP {response.status_code}")
+            raise RuntimeError(
+                f"CalDAV DELETE failed for {resource_path}: HTTP {response.status_code}"
+            )
 
 
 class DryRunCalDAVTransport(CalDAVTransport):
@@ -189,33 +202,9 @@ class SyncOperationSummary:
     changed_posts: int = 0
 
 
-@dataclass
-class _RenderedEvent:
-    uid: str
-    post_id: int
-    summary: str
-    start_utc: datetime
-    end_utc: datetime | None
-    hash: str
-    resource_path: str
-
-
-def _canonical_content_hash(content: str) -> str:
-    return hashlib.sha256(content.encode("utf-8")).hexdigest()
-
-
-def _event_hash(summary: str, start_utc: datetime, end_utc: datetime | None) -> str:
-    material = "|".join(
-        [
-            summary,
-            start_utc.isoformat(),
-            end_utc.isoformat() if end_utc else "",
-        ]
-    )
-    return hashlib.sha256(material.encode("utf-8")).hexdigest()
-
-
-def _cancelled_event_hash(uid: str, sequence: int, start_utc: datetime, end_utc: datetime | None, summary: str) -> str:
+def _cancelled_event_hash(
+    uid: str, sequence: int, start_utc: datetime, end_utc: datetime | None, summary: str
+) -> str:
     material = "|".join(
         [
             "cancelled",
@@ -227,79 +216,6 @@ def _cancelled_event_hash(uid: str, sequence: int, start_utc: datetime, end_utc:
         ]
     )
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
-
-
-def _vevent_resource(uid: str) -> str:
-    return f"{quote(uid, safe='@-_.')}.ics"
-
-
-def _to_utc(value: datetime, tz_name: str) -> datetime:
-    return to_utc_datetime(value, tz_name)
-
-
-
-
-def _list_post_metadata(config: AppConfig, per_page: int = 100) -> list[dict[str, Any]]:
-    def _fetch_page(page: int, size: int) -> list[dict[str, str | int]]:
-        if config.wordpress_mode == "wpcli":
-            return list_posts_wpcli(
-                config.wp_path,
-                config.wp_cli_path,
-                per_page=size,
-                limit=None,
-                page=page,
-            )
-        return list_posts_rest(
-            config.base_url,
-            config.username,
-            config.app_password,
-            config.verify_ssl,
-            per_page=size,
-            limit=None,
-            page=page,
-        )
-
-    posts, _ = list_post_metadata_paginated(fetch_page=_fetch_page, per_page=per_page)
-    return [dict(row) for row in posts]
-
-
-def _uid_for_entry(post_id: int, start_utc: datetime, same_start_ordinal: int, uid_domain: str) -> str:
-    ts = start_utc.strftime("%Y%m%dT%H%M%SZ")
-    return f"wp-{post_id}-{ts}-{same_start_ordinal}@{uid_domain}"
-
-
-def _render_post_events(post_id: int, post_date: str, post_content: str, config: AppConfig, uid_domain: str) -> list[_RenderedEvent]:
-    parsed = parse_post_content(post_content, normalize_post_date(post_date), config)
-    attach_source_metadata(parsed, post_id)
-
-    events: list[_RenderedEvent] = []
-    same_start_counts: defaultdict[str, int] = defaultdict(int)
-
-    for entry in parsed.entries:
-        if entry.start_dt is None:
-            continue
-
-        start_utc = _to_utc(entry.start_dt, config.timezone)
-        end_utc = _to_utc(entry.end_dt, config.timezone) if entry.end_dt else None
-
-        start_key = start_utc.strftime("%Y%m%dT%H%M%SZ")
-        same_start_counts[start_key] += 1
-        ordinal = same_start_counts[start_key]
-
-        uid = _uid_for_entry(post_id, start_utc, ordinal, uid_domain)
-        digest = _event_hash(entry.summary, start_utc, end_utc)
-        events.append(
-            _RenderedEvent(
-                uid=uid,
-                post_id=post_id,
-                summary=entry.summary,
-                start_utc=start_utc,
-                end_utc=end_utc,
-                hash=digest,
-                resource_path=_vevent_resource(uid),
-            )
-        )
-    return events
 
 
 def _parse_index_dt(value: str | None) -> datetime | None:
@@ -326,34 +242,51 @@ def _cancel_uid(
     if old_event is not None and old_event.status == "cancelled":
         return True
 
-    fallback_start = _parse_index_dt(old_event.start_utc if old_event is not None else None)
+    fallback_start = _parse_index_dt(
+        old_event.start_utc if old_event is not None else None
+    )
     if fallback_start is None:
         summary.skipped += 1
         if debug_events is not None:
-            debug_events.append({
-                "operation": "skip",
-                "post_id": old_event.post_id if old_event is not None else fallback_post_id,
-                "uid": uid,
-                "resource_path": old_event.resource_path if old_event is not None else _vevent_resource(uid),
-                "status_before": old_event.status if old_event is not None else None,
-                "status_after": old_event.status if old_event is not None else None,
-                "sequence_before": old_event.sequence if old_event is not None else None,
-                "sequence_after": old_event.sequence if old_event is not None else None,
-                "reason": "missing start_utc",
-            })
+            debug_events.append(
+                {
+                    "operation": "skip",
+                    "post_id": (
+                        old_event.post_id if old_event is not None else fallback_post_id
+                    ),
+                    "uid": uid,
+                    "resource_path": (
+                        old_event.resource_path
+                        if old_event is not None
+                        else vevent_resource(uid)
+                    ),
+                    "status_before": (
+                        old_event.status if old_event is not None else None
+                    ),
+                    "status_after": old_event.status if old_event is not None else None,
+                    "sequence_before": (
+                        old_event.sequence if old_event is not None else None
+                    ),
+                    "sequence_after": (
+                        old_event.sequence if old_event is not None else None
+                    ),
+                    "reason": "missing start_utc",
+                }
+            )
         return False
 
     fallback_end = _parse_index_dt(old_event.end_utc if old_event is not None else None)
     cancelled_sequence = (old_event.sequence if old_event is not None else 0) + 1
     cancelled_summary = old_event.summary if old_event is not None else ""
-    resource_path = old_event.resource_path if old_event is not None else _vevent_resource(uid)
-    cancelled_payload = generate_single_event_ics(
+    resource_path = (
+        old_event.resource_path if old_event is not None else vevent_resource(uid)
+    )
+    cancelled_payload = render_cancelled_event_payload(
         uid=uid,
         summary=cancelled_summary,
-        start_dt=fallback_start,
-        end_dt=fallback_end,
+        start_utc=fallback_start,
+        end_utc=fallback_end,
         sequence=cancelled_sequence,
-        status="CANCELLED",
     )
 
     if not dry_run:
@@ -365,24 +298,32 @@ def _cancel_uid(
             start_utc=fallback_start.isoformat(),
             end_utc=fallback_end.isoformat() if fallback_end else None,
             summary=cancelled_summary,
-            hash=_cancelled_event_hash(uid, cancelled_sequence, fallback_start, fallback_end, cancelled_summary),
+            hash=_cancelled_event_hash(
+                uid, cancelled_sequence, fallback_start, fallback_end, cancelled_summary
+            ),
             sequence=cancelled_sequence,
             status="cancelled",
         )
 
     summary.cancelled += 1
     if debug_events is not None:
-        debug_events.append({
-            "operation": "cancel",
-            "post_id": old_event.post_id if old_event is not None else fallback_post_id,
-            "uid": uid,
-            "resource_path": resource_path,
-            "status_before": old_event.status if old_event is not None else "confirmed",
-            "status_after": "cancelled",
-            "sequence_before": old_event.sequence if old_event is not None else 0,
-            "sequence_after": cancelled_sequence,
-            "reason": reason,
-        })
+        debug_events.append(
+            {
+                "operation": "cancel",
+                "post_id": (
+                    old_event.post_id if old_event is not None else fallback_post_id
+                ),
+                "uid": uid,
+                "resource_path": resource_path,
+                "status_before": (
+                    old_event.status if old_event is not None else "confirmed"
+                ),
+                "status_after": "cancelled",
+                "sequence_before": old_event.sequence if old_event is not None else 0,
+                "sequence_after": cancelled_sequence,
+                "reason": reason,
+            }
+        )
     return True
 
 
@@ -399,21 +340,19 @@ def sync_caldav_once(
     summary = SyncOperationSummary()
     deletion_mode = config.caldav_deletion_mode
 
-    posts = _list_post_metadata(config)
-    post_map = {int(item["id"]): item for item in posts}
+    batch = build_caldav_sync_batch(
+        config, uid_domain=uid_domain, previous_posts=index.posts
+    )
 
-    for post_id, meta in post_map.items():
+    for sync_post in batch.posts:
+        post_id = sync_post.post_id
         post_id_key = str(post_id)
         prev = index.posts.get(post_id_key)
-        modified_gmt = str(meta.get("modified_gmt", ""))
+        modified_gmt = sync_post.modified_gmt
+        content_hash = sync_post.content_hash or ""
 
-        if prev is not None and prev.modified_gmt == modified_gmt:
-            continue
-
-        post = fetch_post(config, post_id)
-        content_hash = _canonical_content_hash(post.post_content)
-        if prev is not None and prev.modified_gmt != modified_gmt and prev.content_hash == content_hash:
-            if not dry_run:
+        if not sync_post.content_changed:
+            if prev is not None and not dry_run:
                 index.posts[post_id_key] = PostSyncState(
                     modified_gmt=modified_gmt,
                     content_hash=content_hash,
@@ -423,7 +362,7 @@ def sync_caldav_once(
             continue
 
         summary.changed_posts += 1
-        rendered_events = _render_post_events(post_id, post.post_date, post.post_content, config, uid_domain)
+        rendered_events = sync_post.events or []
         new_by_uid = {event.uid: event for event in rendered_events}
         old_active_uids = set(prev.event_uids if prev else [])
         old_cancelled_uids = set(prev.cancelled_uids if prev else [])
@@ -434,14 +373,7 @@ def sync_caldav_once(
         for uid in sorted(new_uids - old_uids):
             event = new_by_uid[uid]
             prior_event = index.events.get(uid)
-            payload = generate_single_event_ics(
-                uid=event.uid,
-                summary=event.summary,
-                start_dt=event.start_utc,
-                end_dt=event.end_utc,
-                sequence=0,
-                status="CONFIRMED",
-            )
+            payload = event.ics_payload
             if not dry_run:
                 transport.put(event.resource_path, payload)
             if not dry_run:
@@ -459,17 +391,23 @@ def sync_caldav_once(
             next_cancelled_uids.discard(uid)
             summary.created += 1
             if debug_events is not None:
-                debug_events.append({
-                    "operation": "create",
-                    "post_id": post_id,
-                    "uid": event.uid,
-                    "resource_path": event.resource_path,
-                    "status_before": prior_event.status if prior_event is not None else None,
-                    "status_after": "confirmed",
-                    "sequence_before": prior_event.sequence if prior_event is not None else None,
-                    "sequence_after": 0,
-                    "reason": "new event",
-                })
+                debug_events.append(
+                    {
+                        "operation": "create",
+                        "post_id": post_id,
+                        "uid": event.uid,
+                        "resource_path": event.resource_path,
+                        "status_before": (
+                            prior_event.status if prior_event is not None else None
+                        ),
+                        "status_after": "confirmed",
+                        "sequence_before": (
+                            prior_event.sequence if prior_event is not None else None
+                        ),
+                        "sequence_after": 0,
+                        "reason": "new event",
+                    }
+                )
 
         for uid in sorted(new_uids & old_uids):
             event = new_by_uid[uid]
@@ -477,55 +415,71 @@ def sync_caldav_once(
             current_sequence = 0
             if old_event is not None:
                 current_sequence = old_event.sequence
-            if old_event is not None and (old_event.hash != event.hash or old_event.status != "confirmed"):
+            if old_event is not None and (
+                old_event.hash != event.hash or old_event.status != "confirmed"
+            ):
                 current_sequence += 1
-                payload = generate_single_event_ics(
+                payload = render_confirmed_event_payload(
                     uid=event.uid,
                     summary=event.summary,
-                    start_dt=event.start_utc,
-                    end_dt=event.end_utc,
+                    start_utc=event.start_utc,
+                    end_utc=event.end_utc,
                     sequence=current_sequence,
-                    status="CONFIRMED",
                 )
                 if not dry_run:
                     transport.put(event.resource_path, payload)
                 summary.updated += 1
                 if debug_events is not None:
-                    debug_events.append({
-                        "operation": "restore" if old_event is not None and old_event.status == "cancelled" else "update",
-                        "post_id": post_id,
-                        "uid": event.uid,
-                        "resource_path": event.resource_path,
-                        "status_before": old_event.status if old_event is not None else None,
-                        "status_after": "confirmed",
-                        "sequence_before": (current_sequence - 1),
-                        "sequence_after": current_sequence,
-                        "reason": "restored tombstone" if old_event is not None and old_event.status == "cancelled" else "hash changed",
-                    })
+                    debug_events.append(
+                        {
+                            "operation": (
+                                "restore"
+                                if old_event is not None
+                                and old_event.status == "cancelled"
+                                else "update"
+                            ),
+                            "post_id": post_id,
+                            "uid": event.uid,
+                            "resource_path": event.resource_path,
+                            "status_before": (
+                                old_event.status if old_event is not None else None
+                            ),
+                            "status_after": "confirmed",
+                            "sequence_before": (current_sequence - 1),
+                            "sequence_after": current_sequence,
+                            "reason": (
+                                "restored tombstone"
+                                if old_event is not None
+                                and old_event.status == "cancelled"
+                                else "hash changed"
+                            ),
+                        }
+                    )
             elif old_event is None:
-                payload = generate_single_event_ics(
+                payload = render_confirmed_event_payload(
                     uid=event.uid,
                     summary=event.summary,
-                    start_dt=event.start_utc,
-                    end_dt=event.end_utc,
+                    start_utc=event.start_utc,
+                    end_utc=event.end_utc,
                     sequence=current_sequence,
-                    status="CONFIRMED",
                 )
                 if not dry_run:
                     transport.put(event.resource_path, payload)
                 summary.updated += 1
                 if debug_events is not None:
-                    debug_events.append({
-                        "operation": "update",
-                        "post_id": post_id,
-                        "uid": event.uid,
-                        "resource_path": event.resource_path,
-                        "status_before": None,
-                        "status_after": "confirmed",
-                        "sequence_before": None,
-                        "sequence_after": current_sequence,
-                        "reason": "missing index state",
-                    })
+                    debug_events.append(
+                        {
+                            "operation": "update",
+                            "post_id": post_id,
+                            "uid": event.uid,
+                            "resource_path": event.resource_path,
+                            "status_before": None,
+                            "status_after": "confirmed",
+                            "sequence_before": None,
+                            "sequence_after": current_sequence,
+                            "reason": "missing index state",
+                        }
+                    )
             if not dry_run:
                 index.events[uid] = EventSyncState(
                     uid=event.uid,
@@ -557,21 +511,27 @@ def sync_caldav_once(
                     next_cancelled_uids.add(uid)
             else:
                 if not dry_run:
-                    transport.delete(_vevent_resource(uid))
+                    transport.delete(vevent_resource(uid))
                     index.events.pop(uid, None)
                 summary.deleted += 1
                 if debug_events is not None:
-                    debug_events.append({
-                        "operation": "delete",
-                        "post_id": post_id,
-                        "uid": uid,
-                        "resource_path": _vevent_resource(uid),
-                        "status_before": old_event.status if old_event is not None else None,
-                        "status_after": None,
-                        "sequence_before": old_event.sequence if old_event is not None else None,
-                        "sequence_after": None,
-                        "reason": "removed from source",
-                    })
+                    debug_events.append(
+                        {
+                            "operation": "delete",
+                            "post_id": post_id,
+                            "uid": uid,
+                            "resource_path": vevent_resource(uid),
+                            "status_before": (
+                                old_event.status if old_event is not None else None
+                            ),
+                            "status_after": None,
+                            "sequence_before": (
+                                old_event.sequence if old_event is not None else None
+                            ),
+                            "sequence_after": None,
+                            "reason": "removed from source",
+                        }
+                    )
                 next_cancelled_uids.discard(uid)
 
         if not dry_run:
@@ -583,7 +543,7 @@ def sync_caldav_once(
             )
 
     # Remove state for posts no longer listed in source.
-    stale_post_ids = set(index.posts) - {str(pid) for pid in post_map}
+    stale_post_ids = set(index.posts) - {str(pid) for pid in batch.source_post_ids}
     for stale_post_id in sorted(stale_post_ids):
         stale_state = index.posts[stale_post_id]
         stale_uids = list(stale_state.event_uids) + list(stale_state.cancelled_uids)
@@ -603,21 +563,27 @@ def sync_caldav_once(
                 )
             else:
                 if not dry_run:
-                    transport.delete(_vevent_resource(uid))
+                    transport.delete(vevent_resource(uid))
                     index.events.pop(uid, None)
                 summary.deleted += 1
                 if debug_events is not None:
-                    debug_events.append({
-                        "operation": "delete",
-                        "post_id": int(stale_post_id),
-                        "uid": uid,
-                        "resource_path": _vevent_resource(uid),
-                        "status_before": old_event.status if old_event is not None else None,
-                        "status_after": None,
-                        "sequence_before": old_event.sequence if old_event is not None else None,
-                        "sequence_after": None,
-                        "reason": "post removed from source",
-                    })
+                    debug_events.append(
+                        {
+                            "operation": "delete",
+                            "post_id": int(stale_post_id),
+                            "uid": uid,
+                            "resource_path": vevent_resource(uid),
+                            "status_before": (
+                                old_event.status if old_event is not None else None
+                            ),
+                            "status_after": None,
+                            "sequence_before": (
+                                old_event.sequence if old_event is not None else None
+                            ),
+                            "sequence_after": None,
+                            "reason": "post removed from source",
+                        }
+                    )
         if not dry_run:
             index.posts.pop(stale_post_id, None)
 
