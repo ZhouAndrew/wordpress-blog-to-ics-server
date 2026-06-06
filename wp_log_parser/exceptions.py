@@ -24,3 +24,13 @@ class MalformedResponseError(WpLogParserError):
 
 class ConfigError(WpLogParserError):
     """Raised when config file content is invalid."""
+
+
+NO_VALID_LOG_ENTRIES_MESSAGE = "No valid timed log entries found in post."
+
+
+class NoValidLogEntriesError(RuntimeError, WpLogParserError):
+    """Raised when a post contains no valid timed log entries to export."""
+
+    def __init__(self, message: str = NO_VALID_LOG_ENTRIES_MESSAGE):
+        super().__init__(message)

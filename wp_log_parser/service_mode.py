@@ -10,6 +10,7 @@ from typing import Any
 
 from .aliases import find_today_ics_candidates, generate_today_ics, select_today_ics, today_date_str
 from .config import AppConfig
+from .exceptions import NoValidLogEntriesError
 from .fetcher import fetch_post, list_recent_post_ids, normalize_post_date
 from .ics import build_public_ics_url, generate_ics
 from .ics_exporter import (
@@ -66,7 +67,7 @@ def export_post_to_ics(
         for warn in warnings:
             print(f"[WARN] {warn.reason}: {warn.message}")
     if not parsed.entries:
-        raise RuntimeError("No valid timed log entries found in post.")
+        raise NoValidLogEntriesError()
 
     _phase(verbose, "export", f"exporting post {post_id} to ICS")
     export_entries = _entries_for_export(parsed, config.review_entry_export_mode)
