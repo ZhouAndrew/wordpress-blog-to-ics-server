@@ -13,7 +13,7 @@ from .wordpress import (
     list_posts_wpcli,
     sort_and_limit_posts,
 )
-from .service_mode import export_post_to_ics, publish_once, run_service_loop, update_today_ics
+from .service_mode import export_post_to_ics, publish_once, publish_post, run_service_loop, update_today_ics
 
 
 def list_posts(config: AppConfig, per_page: int | None = None) -> list[dict[str, str | int]]:
