@@ -15,8 +15,7 @@ def parse_post_content(
     config: AppConfig | None = None,
 ) -> dict:
     """Parse sample post content through the package parser and return the public contract."""
-    app_config = config or AppConfig()
-    parsed = _parse_post_content(post_content, post_date, app_config)
+    parsed = _parse_post_content(post_content, post_date, config)
     payload = parsed.to_dict(include_ignored=True)
     payload["ics_preview"] = generate_ics(payload["entries"])
     return payload
