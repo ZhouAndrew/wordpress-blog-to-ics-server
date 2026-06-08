@@ -7,6 +7,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from .aliases import find_today_ics_candidates, generate_today_ics, select_today_ics, today_date_str
 from .config import AppConfig
@@ -37,8 +38,19 @@ def _entries_for_export(parsed, mode: str):
 
 class QuietHTTPRequestHandler(SimpleHTTPRequestHandler):
     def log_message(self, fmt: str, *args: Any) -> None:
-        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ts = _format_log_timestamp(timezone.utc)
         print(f"[{ts}] [HTTP] {self.address_string()} - {fmt % args}")
+
+
+def _format_log_timestamp(tz: timezone | ZoneInfo) -> str:
+    return datetime.now(tz).isoformat(timespec="seconds")
+
+
+def _service_log_timezone(config: AppConfig) -> ZoneInfo:
+    try:
+        return ZoneInfo(config.timezone)
+    except Exception as exc:
+        raise ValueError(f"Invalid timezone: {config.timezone}") from exc
 
 
 def _phase(verbose: bool, stage: str, message: str) -> None:
@@ -247,6 +259,7 @@ def run_service_loop(
 ) -> None:
     if interval_seconds <= 0:
         raise ValueError("--interval must be > 0")
+    log_tz = _service_log_timezone(config)
 
     print("[INFO] Running initial publish cycle")
     try:
@@ -266,7 +279,7 @@ def run_service_loop(
             print(f"[INFO] Sleeping {sleep_for:.1f}s before next cycle")
             time.sleep(sleep_for)
 
-            started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            started_at = _format_log_timestamp(log_tz)
             print(f"[INFO] Publish cycle started at {started_at}")
             try:
                 publish_once(config, days=days, verbose=verbose)
