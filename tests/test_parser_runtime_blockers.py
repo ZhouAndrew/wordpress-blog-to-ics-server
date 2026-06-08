@@ -1,3 +1,4 @@
+from wp_log_parser import parse_post_content as public_parse_post_content
 from wp_log_parser.config import AppConfig
 from wp_log_parser.ics import generate_ics
 from wp_log_parser.models import ParsedPost
@@ -21,6 +22,27 @@ def test_generate_ics_timezone_argument_does_not_shadow_datetime_timezone() -> N
     assert "BEGIN:VCALENDAR" in ics
     assert "DTSTAMP:" in ics
     assert "DTSTART:20260410T224500Z" in ics
+
+
+def test_public_parse_post_content_defaults_to_app_config_when_config_is_omitted() -> None:
+    post_content = "\n".join(
+        [
+            "<!-- wp:paragraph -->",
+            "<p>07:45 Breakfast</p>",
+            "<!-- /wp:paragraph -->",
+            "<!-- wp:paragraph -->",
+            "<p>Not a log line</p>",
+            "<!-- /wp:paragraph -->",
+        ]
+    )
+
+    parsed = public_parse_post_content(post_content, "2026-04-11")
+
+    assert isinstance(parsed, ParsedPost)
+    assert parsed.entries[0].start_time == "07:45"
+    assert parsed.entries[0].end_time == "08:15"  # AppConfig default fallback duration is applied.
+    assert parsed.entries[0].status == "ready"
+    assert [block.reason for block in parsed.ignored_blocks] == ["no_leading_time"]
 
 
 def test_parse_post_content_returns_parsed_post_and_handles_range_and_point() -> None:

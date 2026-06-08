@@ -16,9 +16,11 @@ PARAGRAPH_RE = re.compile(r"<p\b[^>]*>.*?</p>", re.DOTALL | re.IGNORECASE)
 def parse_post_content(
     post_content: str,
     post_date: str,
-    config: AppConfig,
+    config: AppConfig | None = None,
     verbose: bool = False,
 ) -> ParsedPost:
+    """Parse WordPress post content using explicit config or package defaults."""
+    config = config or AppConfig()
     custom_patterns = compile_custom_patterns(config)
     entries: list[LogEntry] = []
     ignored_blocks: list[IgnoredBlock] = []
