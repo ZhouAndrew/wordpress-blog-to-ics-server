@@ -308,7 +308,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_publish_ics = sub.add_parser("publish-ics")
     p_publish_ics.add_argument("--config", default="./config.json")
-    p_publish_ics.add_argument("--days", type=int, required=True)
+    p_publish_ics.add_argument("--days", type=int, default=7)
     p_publish_ics.add_argument("--verbose", action="store_true")
     p_publish_ics.add_argument("--debug", action="store_true")
 
