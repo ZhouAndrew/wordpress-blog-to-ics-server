@@ -83,7 +83,7 @@ python -m wp_log_parser validate-config --config ./config.json
 python -m wp_log_parser post-to-ics --config ./config.json --post-id 10213 --verbose
 
 # 5) Publish recent posts and local index artifacts
-python -m wp_log_parser publish-ics --config ./config.json --days 7 --verbose
+python -m wp_log_parser publish-ics --config ./config.json --verbose
 
 # 6) Refresh the stable today alias
 python -m wp_log_parser update-today-ics --config ./config.json --verbose
@@ -250,11 +250,11 @@ python -m wp_log_parser post-to-ics --config ./config.json --post-id 10213 --ver
 ### Publish ICS for recent posts
 
 ```bash
-python -m wp_log_parser publish-ics --config ./config.json --days 7
-python -m wp_log_parser publish-ics --config ./config.json --days 7 --verbose
+python -m wp_log_parser publish-ics --config ./config.json
+python -m wp_log_parser publish-ics --config ./config.json --verbose
 ```
 
-`publish-ics` requires `--days`. It fetches recent posts, exports eligible posts, writes per-post ICS files, writes parsed JSON/ignored-block reports when configured, generates `index.json` and `index.html`, and attempts to refresh `today.ics` when a deterministic candidate exists.
+`publish-ics` defaults to a 7-day window; pass `--days` to override it. It fetches recent posts, exports eligible posts, writes per-post ICS files, writes parsed JSON/ignored-block reports when configured, generates `index.json` and `index.html`, and attempts to refresh `today.ics` when a deterministic candidate exists.
 
 ### Refresh `today.ics`
 
@@ -408,10 +408,10 @@ python -m wp_log_parser <command> ...
 | Validate config | `python -m wp_log_parser validate-config --config ./config.json` | wpcli/rest | Supported | Fails fast on invalid strict config values or missing runtime dependencies. |
 | Fetch source via wp-cli | `python -m wp_log_parser post-to-ics --config ./config.json --post-id 10213` | `wordpress_mode=wpcli` | Supported | `--post-id` is required for `post-to-ics`. |
 | Fetch source via REST | `python -m wp_log_parser post-to-ics --config ./config.json --post-id 10213` | `wordpress_mode=rest` | Supported | Requires authenticated `base_url`, `username`, `app_password`. |
-| Local ICS batch publish | `python -m wp_log_parser publish-ics --config ./config.json --days 7` | wpcli/rest | Supported | Generates per-post ICS + `index.json` + `index.html`; auto-refreshes `today.ics` when possible. |
+| Local ICS batch publish | `python -m wp_log_parser publish-ics --config ./config.json` | wpcli/rest | Supported | Generates per-post ICS + `index.json` + `index.html`; auto-refreshes `today.ics` when possible. |
 | Today alias update | `python -m wp_log_parser update-today-ics --config ./config.json` | local files | Supported | Use `--mode copy` (default) or `--mode symlink`; optional `--post-id` disambiguates. |
 | Service mode | `python -m wp_log_parser run-ics-service --config ./config.json --days 7 --interval 300 --host 127.0.0.1 --port 5333` | wpcli/rest | Supported | Periodic publish plus local HTTP server. |
-| One-shot publish flow | `python -m wp_log_parser publish-ics --config ./config.json --days 7 --verbose` | wpcli/rest | Supported | Best non-daemon verification path for fresh clones. |
+| One-shot publish flow | `python -m wp_log_parser publish-ics --config ./config.json --verbose` | wpcli/rest | Supported | Best non-daemon verification path for fresh clones. |
 | Dry-run CalDAV sync | `python -m wp_log_parser sync-caldav --config ./config.json --dry-run` | wpcli/rest | Supported | Reports planned changes; does not write CalDAV resources. |
 | Real CalDAV sync | `python -m wp_log_parser sync-caldav --config ./config.json --apply` | wpcli/rest | Supported with preconditions | Requires CalDAV credentials and either a recent compatible dry-run marker or `--force-real-sync`. |
 | Interactive app launcher | `./run.sh` → `python -m wp_log_parser app --config ./config.json` | wpcli/rest | Supported | `run.sh` only starts the TTY app; no background daemon. |
@@ -425,7 +425,7 @@ python -m wp_log_parser <command> ...
 - REST mode requires authenticated application-password access; anonymous REST reads are not the supported assumption.
 - `run.sh` opens the interactive TTY app only; it does **not** directly run `publish-ics`, `update-today-ics`, or `run-ics-service`.
 - `install.sh` installs dependencies and optionally runs `init-config --wizard`, but it does not validate WordPress/CalDAV connectivity end-to-end.
-- `publish-ics` requires `--days`; there is no implicit default on that command.
+- `publish-ics` defaults to a 7-day window; pass `--days` when you need a different recent-post window.
 - `post-to-ics` requires `--post-id`; there is no silent fallback to an arbitrary post.
 - `doctor` validates configuration/environment checks but does not execute a full fetch→parse→export simulation.
 - The final point entry may remain `needs_review` unless fallback duration/export policy includes it as desired.
@@ -462,7 +462,7 @@ Add `--debug` to these commands:
 python -m wp_log_parser sync-caldav --config ./config.json --debug
 python -m wp_log_parser run-today --config ./config.json --debug
 python -m wp_log_parser post-to-ics --config ./config.json --post-id 10213 --debug
-python -m wp_log_parser publish-ics --config ./config.json --days 7 --debug
+python -m wp_log_parser publish-ics --config ./config.json --debug
 ```
 
 `--debug` prints a human-readable diagnostics header and writes a sanitized snapshot to `<error_dir>/last_run.json`. On failures, a timestamped copy is also written to `<error_dir>/debug_YYYYMMDDTHHMMSSZ.json`.
