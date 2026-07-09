@@ -144,13 +144,13 @@ Expected result in `output_dir`:
 ## 7) Publish recent posts and generate indexes
 
 ```bash
-python -m wp_log_parser publish-ics --config ./config.json --days 7
+python -m wp_log_parser publish-ics --config ./config.json
 ```
 
 Verbose example:
 
 ```bash
-python -m wp_log_parser publish-ics --config ./config.json --days 7 --verbose
+python -m wp_log_parser publish-ics --config ./config.json --verbose
 ```
 
 Expected artifacts in `output_dir`:
@@ -162,7 +162,7 @@ Expected artifacts in `output_dir`:
 - `index.html`
 - `today.ics` if at least one generated file matches the local date in `timezone`
 
-`publish-ics` requires `--days`; there is no implicit default for this command.
+`publish-ics` defaults to a 7-day window; pass `--days` when you need a different recent-post window.
 
 ---
 
@@ -232,7 +232,7 @@ python -m wp_log_parser run-today --config ./config.json
 For publish verification, prefer the explicit one-shot publish flow:
 
 ```bash
-python -m wp_log_parser publish-ics --config ./config.json --days 7 --verbose
+python -m wp_log_parser publish-ics --config ./config.json --verbose
 python -m wp_log_parser update-today-ics --config ./config.json --verbose
 ```
 
@@ -262,7 +262,7 @@ python -m wp_log_parser sync-caldav --config ./config.json --apply --force-real-
 python -m wp_log_parser init-config --config ./config.json
 python -m wp_log_parser validate-config --config ./config.json
 python -m wp_log_parser post-to-ics --config ./config.json --post-id 10213 --verbose
-python -m wp_log_parser publish-ics --config ./config.json --days 7 --verbose
+python -m wp_log_parser publish-ics --config ./config.json --verbose
 python -m wp_log_parser update-today-ics --config ./config.json --verbose
 python -m wp_log_parser run-ics-service --config ./config.json --days 7 --interval 60
 ```

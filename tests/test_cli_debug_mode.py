@@ -198,7 +198,7 @@ def test_successful_publish_ics_does_not_fail_if_snapshot_write_fails(monkeypatc
     )
     monkeypatch.setattr(cli, "write_recent_run_snapshot", lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("snapshot failed")))
 
-    code = cli.main(["publish-ics", "--config", "./config.json", "--days", "7"])
+    code = cli.main(["publish-ics", "--config", "./config.json"])
     out = capsys.readouterr().out
 
     assert code == 0

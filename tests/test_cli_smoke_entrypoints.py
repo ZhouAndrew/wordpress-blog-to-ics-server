@@ -62,7 +62,12 @@ def test_smoke_entry_points_dispatch_without_wordpress(monkeypatch):
     )
     monkeypatch.setattr(cli, "attach_source_metadata", lambda *_a, **_k: None)
     monkeypatch.setattr(cli, "write_post_ics", lambda *_a, **_k: "/tmp/out.ics")
-    monkeypatch.setattr(cli, "publish_once", lambda *_a, **_k: {"ok": True, "items": [], "published_count": 0})
+    publish_calls = []
+    monkeypatch.setattr(
+        cli,
+        "publish_once",
+        lambda _config, days, **_k: publish_calls.append(days) or {"ok": True, "items": [], "published_count": 0},
+    )
     monkeypatch.setattr(cli, "run_service_loop", lambda *_a, **_k: None)
     monkeypatch.setattr(cli, "today_date_str", lambda _tz: "2026-05-24")
     monkeypatch.setattr(cli, "find_today_ics_candidates", lambda *_a, **_k: [])
@@ -70,6 +75,9 @@ def test_smoke_entry_points_dispatch_without_wordpress(monkeypatch):
     monkeypatch.setattr(cli, "generate_today_ics", lambda *_a, **_k: type("T", (), {"name": "today.ics"})())
 
     assert cli.main(["post-to-ics", "--config", "./config.json", "--post-id", "9"]) == 0
+    assert cli.main(["publish-ics", "--config", "./config.json"]) == 0
+    assert publish_calls[-1] == 7
     assert cli.main(["publish-ics", "--config", "./config.json", "--days", "1"]) == 0
+    assert publish_calls[-1] == 1
     assert cli.main(["update-today-ics", "--config", "./config.json"]) == 0
     assert cli.main(["run-ics-service", "--config", "./config.json", "--days", "1", "--interval", "1"]) == 0
