@@ -226,3 +226,5 @@ index.json
 index.html
 today.ics
 debug_report.json
+logs/caldav_dry_run_marker.json
+errors/last_health_report.json
