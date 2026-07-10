@@ -193,3 +193,74 @@ def test_unsupported_gutenberg_blocks_report_index_type_reason_and_raw() -> None
     assert [item["type"] for item in ignored] == ["wp:file", "wp:image", "wp:list", "wp:heading"]
     assert {item["reason"] for item in ignored} == {"unsupported_block_type"}
     assert all(item["raw"] for item in ignored)
+
+
+def test_legacy_chained_point_entries_use_second_timestamp_as_start() -> None:
+    post_content = "\n".join(
+        [
+            "<!-- wp:paragraph -->",
+            "<p>11:45 12:10上传think3的视频,尝试将wmv转换为mkv</p>",
+            "<!-- /wp:paragraph -->",
+            "<!-- wp:paragraph -->",
+            "<p>12:10 13:10 我发现应该用ffmpeg</p>",
+            "<!-- /wp:paragraph -->",
+            "<!-- wp:paragraph -->",
+            "<p>13:10 13:40 雨中漫步</p>",
+            "<!-- /wp:paragraph -->",
+            "<!-- wp:paragraph -->",
+            "<p>14:00 Follow-up</p>",
+            "<!-- /wp:paragraph -->",
+        ]
+    )
+
+    parsed = parse_post_content(post_content, "2026-04-11", AppConfig(default_last_event_minutes=0))
+
+    assert [entry.start_time for entry in parsed.entries[:3]] == ["12:10", "13:10", "13:40"]
+    assert [entry.end_time for entry in parsed.entries[:3]] == ["13:10", "13:40", "14:00"]
+    assert [entry.summary for entry in parsed.entries[:3]] == [
+        "上传think3的视频,尝试将wmv转换为mkv",
+        "我发现应该用ffmpeg",
+        "雨中漫步",
+    ]
+
+
+def test_point_entries_allow_timestamp_immediately_followed_by_unicode_text() -> None:
+    post_content = "\n".join(
+        [
+            "<!-- wp:paragraph -->",
+            "<p>8:15起床</p>",
+            "<!-- /wp:paragraph -->",
+            "<!-- wp:paragraph -->",
+            "<p>8:21漱口</p>",
+            "<!-- /wp:paragraph -->",
+            "<!-- wp:paragraph -->",
+            "<p>11:00完成160cards in Anki</p>",
+            "<!-- /wp:paragraph -->",
+        ]
+    )
+
+    parsed = parse_post_content(post_content, "2026-04-11", AppConfig(default_last_event_minutes=30))
+
+    assert [entry.start_time for entry in parsed.entries] == ["08:15", "08:21", "11:00"]
+    assert [entry.end_time for entry in parsed.entries] == ["08:21", "11:00", "11:30"]
+    assert [entry.summary for entry in parsed.entries] == ["起床", "漱口", "完成160cards in Anki"]
+    assert parsed.ignored_blocks == []
+
+
+def test_unicode_point_entries_infer_end_and_apply_default_final_duration() -> None:
+    post_content = "\n".join(
+        [
+            "<!-- wp:paragraph -->",
+            "<p>8:15起床</p>",
+            "<!-- /wp:paragraph -->",
+            "<!-- wp:paragraph -->",
+            "<p>8:21漱口</p>",
+            "<!-- /wp:paragraph -->",
+        ]
+    )
+
+    parsed = parse_post_content(post_content, "2026-04-11", AppConfig(default_last_event_minutes=30))
+
+    assert [entry.start_time for entry in parsed.entries] == ["08:15", "08:21"]
+    assert [entry.end_time for entry in parsed.entries] == ["08:21", "08:51"]
+    assert [entry.summary for entry in parsed.entries] == ["起床", "漱口"]

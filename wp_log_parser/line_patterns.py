@@ -8,10 +8,14 @@ if TYPE_CHECKING:
     from .config import AppConfig
 
 RANGE_RE = re.compile(
-    r"^\s*(\d{1,2}):([0-5]\d)\s*(?:-|–|—|~)\s*(\d{1,2}):([0-5]\d)\b(.*)$",
+    r"^\s*(\d{1,2}):([0-5]\d)\s*(?:-|–|—|~)\s*(\d{1,2}):([0-5]\d)(?!\d)(.*)$",
     re.DOTALL,
 )
-POINT_RE = re.compile(r"^\s*(\d{1,2}):([0-5]\d)\b(.*)$", re.DOTALL)
+LEGACY_CHAINED_POINT_RE = re.compile(
+    r"^\s*(\d{1,2}):([0-5]\d)\s+(\d{1,2}):([0-5]\d)(?!\d)(.*)$",
+    re.DOTALL,
+)
+POINT_RE = re.compile(r"^\s*(\d{1,2}):([0-5]\d)(?!\d)(.*)$", re.DOTALL)
 
 
 @dataclass
@@ -126,7 +130,16 @@ def parse_log_line(
         summary = range_match.group(5).strip()
         return ParsedLine(kind="range", start_time=start, end_time=end, summary=summary)
 
-    # 3) built-in point format
+    # 3) built-in legacy chained-point format
+    legacy_match = LEGACY_CHAINED_POINT_RE.match(line)
+    if legacy_match:
+        start = _normalize_time(legacy_match.group(3), legacy_match.group(4))
+        if not start:
+            return None
+        summary = legacy_match.group(5).strip()
+        return ParsedLine(kind="legacy_chained_point", start_time=start, end_time=None, summary=summary)
+
+    # 4) built-in point format
     point_match = POINT_RE.match(line)
     if point_match:
         start = _normalize_time(point_match.group(1), point_match.group(2))
