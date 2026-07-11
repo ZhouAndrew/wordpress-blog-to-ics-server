@@ -1,8 +1,10 @@
 *.ics
-*/*.ics]
+*/*.ics
 */*/*.ics
 config.json
 published_ics/*.*
+errors/last_run.json
+/FETCH_HEAD
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
