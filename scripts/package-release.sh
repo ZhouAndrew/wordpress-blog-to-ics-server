@@ -117,18 +117,20 @@ fi
 
 info "Checking repository hygiene"
 
+FORBIDDEN_RELEASE_PATH_PATTERN='(^|/)(config\.json|secrets\.json|\.env|\.env\.local|today\.ics|index\.json|index\.html)$|(^|/).*\.secrets\.json$|(^|/).*\.tokens?$|(^|/)errors/last_run\.json$|^FETCH_HEAD$'
+
 FORBIDDEN_TRACKED="$(
     git ls-files |
-    grep -E '(^|/)(config\.json|secrets\.json|.*\.secrets\.json|.*\.token|.*\.tokens)$' \
+    grep -E "$FORBIDDEN_RELEASE_PATH_PATTERN" \
     || true
 )"
 
 if [[ -n "$FORBIDDEN_TRACKED" ]]; then
     echo "$FORBIDDEN_TRACKED" >&2
-    fail "Forbidden runtime or secret files are tracked by Git."
+    fail "Forbidden runtime, generated, Git metadata, or secret files are tracked by Git."
 fi
 
-echo "No forbidden config or secret files are tracked."
+echo "No forbidden runtime, generated, Git metadata, or secret files are tracked."
 
 # ---------------------------------------------------------------------------
 # Test suite
@@ -185,14 +187,17 @@ info "Verifying package contents"
 
 FORBIDDEN_ARCHIVE_ENTRIES="$(
     tar -tzf "$TAR_FILE" |
-    grep -E '(^|/)(config\.json|secrets\.json|.*\.secrets\.json|.*\.token|.*\.tokens)$' \
+    while IFS= read -r archive_entry; do
+        printf '%s\n' "${archive_entry#"$ARCHIVE_PREFIX"}"
+    done |
+    grep -E "$FORBIDDEN_RELEASE_PATH_PATTERN" \
     || true
 )"
 
 if [[ -n "$FORBIDDEN_ARCHIVE_ENTRIES" ]]; then
     echo "$FORBIDDEN_ARCHIVE_ENTRIES" >&2
     rm -f "$TAR_FILE" "$ZIP_FILE"
-    fail "Release archive contains forbidden config or secret files."
+    fail "Release archive contains forbidden runtime, generated, Git metadata, or secret files."
 fi
 
 echo "Archive hygiene check passed."
