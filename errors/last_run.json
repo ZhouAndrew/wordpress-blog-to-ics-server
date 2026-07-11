@@ -1,0 +1,66 @@
+{
+  "timestamp_utc": "2026-07-10T10:26:35Z",
+  "command": "publish-ics",
+  "success": true,
+  "dry_run": null,
+  "config": {
+    "wordpress_mode": "wpcli",
+    "wp_cli_path": "wp",
+    "wp_path": ".",
+    "python_path": "python3",
+    "output_dir": "/tmp/pytest-of-andrew/pytest-0/test_publish_ics_command_write0",
+    "error_dir": "./errors",
+    "logs_dir": "./logs",
+    "log_format": "gutenberg_raw",
+    "base_url": "",
+    "username": "",
+    "app_password": "",
+    "verify_ssl": true,
+    "ics_base_url": "",
+    "timezone": "UTC",
+    "default_last_event_minutes": 30,
+    "post_selection_count": 20,
+    "allow_empty_summary": false,
+    "auto_cross_midnight": true,
+    "save_ignored_blocks": true,
+    "unmatched_line_policy": "ignore",
+    "custom_parsing_patterns": [],
+    "overlap_policy": "needs_review",
+    "review_entry_export_mode": "include",
+    "caldav_url": "",
+    "caldav_username": "",
+    "caldav_password": "",
+    "caldav_uid_domain": "wordpress-blog-to-ics",
+    "caldav_index_path": "./output/caldav_sync_index.json",
+    "caldav_deletion_mode": "delete"
+  },
+  "summary": {
+    "generated_at": "2026-07-10T10:26:35.937260+00:00",
+    "recent_days": 1,
+    "published_count": 1,
+    "index_json": "/tmp/pytest-of-andrew/pytest-0/test_publish_ics_command_write0/index.json",
+    "index_html": "/tmp/pytest-of-andrew/pytest-0/test_publish_ics_command_write0/index.html",
+    "today_refreshed": true,
+    "today_source_file": "2026-05-24_post_9_demo.ics",
+    "items": [
+      {
+        "post_id": 404,
+        "title": "Daily 404",
+        "post_date": "2026-04-11 09:00:00",
+        "ics_file": "2026-04-11_post_404_Daily_404.ics",
+        "ics_url": null,
+        "entry_count": 1,
+        "ignored_block_count": 0,
+        "warning_count": 0,
+        "parsed_json_file": "/tmp/pytest-of-andrew/pytest-0/test_publish_ics_command_write0/2026-04-11_post_404_Daily_404.parsed.json",
+        "ignored_file": "/tmp/pytest-of-andrew/pytest-0/test_publish_ics_command_write0/2026-04-11_post_404_Daily_404.ignored.json"
+      }
+    ]
+  },
+  "processed_post_ids": [
+    404
+  ],
+  "changed_post_count": null,
+  "caldav_counts": {},
+  "index_path": "/tmp/pytest-of-andrew/pytest-0/test_publish_ics_command_write0/index.json"
+}
