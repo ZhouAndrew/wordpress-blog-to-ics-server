@@ -539,3 +539,20 @@ If any credential is accidentally committed, shared, or exposed in logs/artifact
 - Any API token or local secret used by this project
 
 After rotation, update your local `config.json`, re-run validation, and confirm old credentials no longer work.
+
+
+## Optional WordPress inbox uploader
+
+The independent **WordPress Inbox Watcher** ingests files/folders into date-matched
+WordPress daily posts. It supports WP-CLI or REST Application Passwords, an optional
+Tkinter message window, a single background worker, and a `work/debug.log` log.
+It does not change the WordPress → ParsedDayLog → ICS / CalDAV pipeline.
+
+- [Watcher documentation and usage](tools/wp-inbox-watcher/README.md)
+- Start from this checkout: `./tools/wp-inbox-watcher/run.sh [INBOX_DIRECTORY]`
+- Build the separate ZIP: `bash tools/wp-inbox-watcher/package.sh`
+  (written to `dist/wordpress-inbox-watcher-v0.2.zip` after passing unit tests).
+
+**Caution:** The watcher moves local files into its `work/` staging area and
+publishes uploads to WordPress. Try it with a disposable inbox and test WordPress
+site before using personal files. `key.txt`, `work/` and `trash/` are ignored.
