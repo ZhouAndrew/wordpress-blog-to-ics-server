@@ -1,0 +1,30 @@
+name: Inbox Watcher packaging
+
+on:
+  pull_request:
+    paths:
+      - 'tools/wp-inbox-watcher/**'
+      - '.github/workflows/inbox-watcher.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tools/wp-inbox-watcher/**'
+      - '.github/workflows/inbox-watcher.yml'
+  workflow_dispatch:
+
+jobs:
+  test-and-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test and package inbox watcher
+        run: bash tools/wp-inbox-watcher/package.sh
+      - name: Upload downloadable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: wordpress-inbox-watcher-v0.2
+          path: dist/wordpress-inbox-watcher-v0.2.zip
+          if-no-files-found: error
