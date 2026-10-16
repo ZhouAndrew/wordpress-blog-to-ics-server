@@ -32,7 +32,7 @@
             if ( props.name !== 'core/file' ) {
                 return el( BlockEdit, props );
             }
-            var url = media && media.mime === 'text/html' && media.source_url ? media.source_url :
+            var url = media && ( media.mime_type === 'text/html' || media.mime === 'text/html' ) && media.source_url ? media.source_url :
                 props.attributes && props.attributes.href;
             url = localHtmlUrl( url );
             if ( !url ) {
