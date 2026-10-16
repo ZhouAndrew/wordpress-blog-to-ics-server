@@ -9,7 +9,7 @@ const wp = {
     i18n: { __: x => x },
     compose: { createHigherOrderComponent: x => x },
     data: { useSelect: callback => callback(name => ({getMedia: id => id === 12 ? {
-        mime: 'text/html', source_url: 'https://andrew.local/uploads/real.html'
+        mime_type: 'text/html', source_url: 'https://andrew.local/uploads/real.html'
     } : null})) },
     hooks: { addFilter: (hook, name, callback) => {assert.equal(hook,'editor.BlockEdit'); filter=callback;} }
 };
