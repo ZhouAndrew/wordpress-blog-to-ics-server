@@ -1,0 +1,75 @@
+name: HTML File Preview Plugin
+
+on:
+  pull_request:
+    paths:
+      - 'wordpress-plugin/html-file-preview/**'
+      - '.github/workflows/html-file-preview.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'wordpress-plugin/html-file-preview/**'
+      - '.github/workflows/html-file-preview.yml'
+
+jobs:
+  wordpress-plugin:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: html_preview_wp
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mysqli, mbstring, xml
+          tools: none
+          coverage: none
+
+      - name: Static and logic tests
+        run: |
+          php -l wordpress-plugin/html-file-preview/html-file-preview.php
+          php wordpress-plugin/html-file-preview/tests/unit.php
+          node wordpress-plugin/html-file-preview/tests/editor.test.cjs
+
+      - name: Build installable WordPress plugin ZIP
+        run: |
+          mkdir -p dist
+          cd wordpress-plugin
+          zip -q -r ../dist/html-file-preview-0.1.0.zip html-file-preview -x 'html-file-preview/tests/*'
+          unzip -l ../dist/html-file-preview-0.1.0.zip
+          unzip -p ../dist/html-file-preview-0.1.0.zip html-file-preview/html-file-preview.php | grep -F 'Plugin Name: HTML File Preview'
+
+      - name: Install WordPress CLI
+        run: |
+          curl -fsSL --retry 3 https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar -o /tmp/wp-cli.phar
+          php /tmp/wp-cli.phar --info
+
+      - name: Install real WordPress and activate plugin
+        run: |
+          set -euxo pipefail
+          WPROOT="$RUNNER_TEMP/wordpress-test"
+          php /tmp/wp-cli.phar core download --path="$WPROOT" --locale=en_US
+          php /tmp/wp-cli.phar config create --path="$WPROOT" --dbname=html_preview_wp --dbuser=root --dbpass=root --dbhost=127.0.0.1
+          php /tmp/wp-cli.phar core install --path="$WPROOT" --url=http://localhost:8888 --title=PreviewTest --admin_user=admin --admin_password=TestPassword123! --admin_email=test@example.org --skip-email
+          php /tmp/wp-cli.phar plugin install "$GITHUB_WORKSPACE/dist/html-file-preview-0.1.0.zip" --activate --path="$WPROOT"
+          php /tmp/wp-cli.phar eval-file wordpress-plugin/html-file-preview/tests/wordpress-integration.php --path="$WPROOT"
+
+      - name: Publish tested plugin ZIP as CI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: html-file-preview-wordpress-plugin
+          path: dist/html-file-preview-0.1.0.zip
+          if-no-files-found: error

@@ -1,0 +1,19 @@
+/* Opt-in enhancement of core/file: no alterations to native links or buttons. */
+.wp-block-file .hfp-preview,
+.hfp-preview--editor {
+    margin-top: 1rem;
+}
+.hfp-preview__label {
+    margin-bottom: .4rem;
+    font-size: .875rem;
+    font-weight: 600;
+}
+.hfp-preview__frame {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    height: min(65vh, 640px);
+    min-height: 280px;
+    border: 1px solid #c3c4c7;
+    background: #fff;
+}
