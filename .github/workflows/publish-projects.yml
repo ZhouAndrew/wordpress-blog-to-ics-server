@@ -92,15 +92,15 @@ jobs:
         shell: bash
         run: |
           cat > dist/RELEASE-NOTES.md <<'NOTES'
-          # Coordinated WordPress project preview release
+          # Coordinated WordPress tools release
 
-          This pre-release contains three projects:
+          This release bundles three projects:
 
           1. WordPress Blog to ICS / CalDAV: full repository source archive including CLI, parser, exporter, synchronization and tests.
           2. WordPress Inbox Watcher 0.3.1: standalone Python + Tkinter watcher; folders and rejected file types are uploaded as ZIP or tar.gz, preserving original suffixes; debug logs and recovery.
           3. HTML File Preview 0.1.0: installable WordPress plugin ZIP.
 
-          The watcher has passed automated simulated uploads but not real WordPress upload acceptance on the maintainer's host. Plugin installation/integration is tested on a disposable WordPress server in CI. This is a pre-release and not a certification of production readiness.
+          The watcher passed simulated upload tests, but direct upload-to-diary acceptance on the maintainer's actual WordPress host is still pending. The HTML preview plugin is installed and integration-tested on a disposable WordPress server in CI. A stable GitHub release denotes the release channel, not certification of the user's production environment.
 
           Runtime secrets and private files are not distributed.
           NOTES
@@ -118,7 +118,7 @@ jobs:
             dist/RELEASE-NOTES.md
             dist/SHA256SUMS
           if-no-files-found: error
-      - name: Publish GitHub pre-release
+      - name: Publish GitHub release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -136,9 +136,15 @@ jobs:
             git tag "$VERSION" "$GITHUB_SHA"
             git push origin "refs/tags/$VERSION"
           fi
+          RELEASE_FLAGS=()
+          if [[ "$VERSION" == *-* ]]; then
+            RELEASE_FLAGS=(--prerelease)
+          else
+            RELEASE_FLAGS=(--latest)
+          fi
           if gh release view "$VERSION" >/dev/null 2>&1; then
             gh release upload "$VERSION" dist/*.zip dist/*.tar.gz dist/RELEASE-METADATA.txt dist/RELEASE-NOTES.md dist/SHA256SUMS --clobber
-            gh release edit "$VERSION" --prerelease --notes-file dist/RELEASE-NOTES.md
+            gh release edit "$VERSION" "${RELEASE_FLAGS[@]}" --notes-file dist/RELEASE-NOTES.md
           else
-            gh release create "$VERSION" dist/*.zip dist/*.tar.gz dist/RELEASE-METADATA.txt dist/RELEASE-NOTES.md dist/SHA256SUMS --verify-tag --prerelease --title "WordPress tools $VERSION" --notes-file dist/RELEASE-NOTES.md
+            gh release create "$VERSION" dist/*.zip dist/*.tar.gz dist/RELEASE-METADATA.txt dist/RELEASE-NOTES.md dist/SHA256SUMS --verify-tag "${RELEASE_FLAGS[@]}" --title "WordPress tools $VERSION" --notes-file dist/RELEASE-NOTES.md
           fi

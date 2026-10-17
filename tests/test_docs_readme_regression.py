@@ -9,7 +9,7 @@ def test_readme_contains_current_phase_2_commands_and_status_statements() -> Non
     readme = _read("README.md")
 
     required_snippets = [
-        "Pre-alpha / internal validation build",
+        "Stable GitHub release: v0.2.0",
         "python -m wp_log_parser init-config --config ./config.json",
         "python -m wp_log_parser init-config --wizard --config ./config.json",
         "python -m wp_log_parser validate-config --config ./config.json",
