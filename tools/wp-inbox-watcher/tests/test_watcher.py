@@ -1,4 +1,6 @@
 import json
+import zipfile
+import tarfile
 import logging
 import os
 from pathlib import Path
@@ -103,13 +105,69 @@ class WpiTests(unittest.TestCase):
         (folder / "first.pdf").write_bytes(b"%PDF")
         (folder / "sub" / "second.ics").write_text("BEGIN:VCALENDAR\nEND:VCALENDAR\n")
         self.processor.accept(folder)
-        self.assertEqual(len(self.backend.uploads), 2)
+        self.assertEqual(len(self.backend.uploads), 1)
+        self.assertEqual(self.backend.uploads[0][0], "Notes.zip")
         content = "\n".join(post["content"] for post in self.backend.posts.values())
-        self.assertIn("Notes/first.pdf", content)
-        self.assertIn("Notes/sub/second.ics", content)
+        self.assertIn("Notes → Notes.zip", content)
         self.assertIn("wp:file", content)
         self.assertFalse(folder.exists())
         self.assertEqual(len(list((self.root / "trash").iterdir())), 1)
+
+    def test_xpi_archive_keeps_original_extension(self):
+        file = self.root / "plugin.xpi"
+        file.write_bytes(b"anything")
+        self.processor.accept(file)
+        self.assertEqual(self.backend.uploads[0][0], "plugin.xpi.zip")
+        job_file = next((self.root / "work/jobs").glob("*.json"))
+        job = json.loads(job_file.read_text())
+        self.assertEqual(job["uploaded"]["plugin.xpi"]["filename"], "plugin.xpi.zip")
+        self.assertFalse(any((self.root / "work/archives").rglob("*.zip")))
+
+    def test_disallowed_type_retries_as_archive(self):
+        class RestrictedWordPress(FakeWordPress):
+            def upload(self, path, post_id, mime):
+                if not path.name.endswith(".zip"):
+                    raise RuntimeError("Sorry, you are not allowed to upload this file type.")
+                return super().upload(path, post_id, mime)
+
+        self.processor.backend = RestrictedWordPress()
+        file = self.root / "report.xyz123"
+        file.write_bytes(b"confidential")
+        self.processor.accept(file)
+        self.assertEqual(self.processor.backend.uploads[0][0], "report.xyz123.zip")
+
+    def test_tar_gz_archives_directory_and_empty_folders(self):
+        self.processor.archive_format = "tar.gz"
+        folder = self.root / "Project"
+        folder.mkdir()
+        (folder / "empty").mkdir()
+        (folder / "notes.txt").write_text("notes")
+        self.processor.accept(folder)
+        self.assertEqual(self.backend.uploads[0][0], "Project.tar.gz")
+
+    def test_reject_directory_symlinks_without_upload(self):
+        folder = self.root / "dir"
+        folder.mkdir()
+        (folder / "link").symlink_to(self.root / "key.txt")
+        with self.assertRaises(RuntimeError):
+            self.processor.accept(folder)
+        self.assertEqual(self.backend.uploads, [])
+
+    def test_archive_helpers_preserve_structure_and_suffixes(self):
+        folder = self.root / "class.tar"
+        folder.mkdir()
+        (folder / "sub").mkdir()
+        (folder / "sub" / "a.ics").write_text("calendar")
+        dest = self.root / "work" / "class.tar.zip"
+        w.create_upload_archive(folder, dest, "zip")
+        with zipfile.ZipFile(dest) as archive:
+            self.assertIn("class.tar/sub/a.ics", archive.namelist())
+        tarfile_name = self.root / "work" / "class.tar.tar.gz"
+        w.create_upload_archive(folder, tarfile_name, "tar.gz")
+        with tarfile.open(tarfile_name) as archive:
+            self.assertIn("class.tar/sub/a.ics", archive.getnames())
+        self.assertEqual(w.archive_filename("addon.xpi", "zip"), "addon.xpi.zip")
+        self.assertEqual(w.archive_filename("addon.xpi", "tar.gz"), "addon.xpi.tar.gz")
 
     def test_resume_after_content_update_error_without_duplicate_upload(self):
         file = self.root / "file.txt"

@@ -556,3 +556,15 @@ It does not change the WordPress → ParsedDayLog → ICS / CalDAV pipeline.
 **Caution:** The watcher moves local files into its `work/` staging area and
 publishes uploads to WordPress. Try it with a disposable inbox and test WordPress
 site before using personal files. `key.txt`, `work/` and `trash/` are ignored.
+
+## Coordinated preview bundle (v0.2.0-beta.1)
+
+This repository ships three independent components with different installation paths:
+
+- **Blog → ICS / CalDAV**: repository source distributions (.tar.gz and .zip), plus CLI setup instructions in this README.
+- **Inbox Watcher 0.3.0**: standalone `tools/wp-inbox-watcher/wp_inbox_watcher.py` for direct `python3` execution; optional graphical status and source-preserving .zip/.tar.gz fallback for rejected uploads and directories.
+- **HTML File Preview 0.1.0**: installable `html-file-preview-0.1.0.zip` WordPress plugin; see `wordpress-plugin/html-file-preview/README.md`.
+
+Build packages locally with `bash scripts/package-release.sh v0.2.0-beta.1` on a clean main checkout and `bash tools/wp-inbox-watcher/package.sh`. A branch named `publish/v0.2.0-beta.1` initiates the GitHub Actions release gate, which reruns tests and publishes each artifact in one **pre-release**.
+
+Security: never distribute `key.txt`, WordPress Application Passwords, `config.json`, or inbox `work/` and `trash/`. The independent uploader still requires real-site verification with disposable files before production use.
