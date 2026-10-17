@@ -1,0 +1,77 @@
+name: HTML File Preview Beta Release
+
+on:
+  workflow_run:
+    workflows:
+      - HTML File Preview Plugin
+    types:
+      - completed
+
+jobs:
+  prerelease:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Download verified WordPress plugin artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: html-file-preview-wordpress-plugin
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: dist
+
+      - name: Validate prerelease ZIP after download
+        run: |
+          set -euo pipefail
+          package="dist/html-file-preview-0.1.0-beta.1.zip"
+          test -s "$package"
+          unzip -t "$package"
+          unzip -p "$package" html-file-preview/html-file-preview.php | grep -F 'Version: 0.1.0-beta.1'
+          unzip -p "$package" html-file-preview/LICENSE | grep -F 'MIT License'
+
+      - name: Create GitHub prerelease from tested ZIP
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          tag="html-file-preview-v0.1.0-beta.1"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Release already exists; refusing to replace existing assets"
+            exit 1
+          fi
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" >/dev/null 2>&1; then
+            echo "::error::Tag already exists; refusing to move it"
+            exit 1
+          fi
+          cat > release-notes.md <<'NOTES'
+          ## HTML File Preview v0.1.0-beta.1
+
+          **Pre-release / 测试版** of the WordPress Gutenberg File block HTML preview plugin.
+
+          - Enhances the native `core/file` block with a same-site HTML / HTM iframe preview.
+          - Keeps the existing file link and download button.
+          - Uses a restricted iframe sandbox; does not change WordPress HTML upload permissions.
+          - Leaves PDF and ICS File blocks unchanged.
+          - MIT-licensed; isolated from the Python WordPress-to-ICS and CalDAV code.
+
+          **Verified:** PHP checks, editor JavaScript tests, and real WordPress installation
+          from the ZIP with Gutenberg render integration checks passed in GitHub Actions.
+          Visual testing in your own browser and server configuration remains recommended.
+
+          **Install:** WordPress Admin → Plugins → Add New → Upload Plugin →
+          select `html-file-preview-0.1.0-beta.1.zip` → Install → Activate.
+
+          **Note:** This is the HTML File Preview plugin test release; it is separate
+          from the parent project's `v0.1.0-alpha` release.
+          NOTES
+          gh release create "$tag" dist/html-file-preview-0.1.0-beta.1.zip \
+            --repo "$GITHUB_REPOSITORY" --target "$TESTED_SHA" \
+            --title 'HTML File Preview v0.1.0-beta.1 (Pre-release)' \
+            --notes-file release-notes.md --prerelease

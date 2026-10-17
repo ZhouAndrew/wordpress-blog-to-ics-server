@@ -1,6 +1,6 @@
-# HTML File Preview (WordPress Gutenberg)
+# HTML File Preview v0.1.0-beta.1 (WordPress Gutenberg)
 
-Minimal MIT-licensed WordPress plugin that **enhances the built-in File (`core/file`) block** rather than registering a competing uploader or modifying WordPress core.
+MIT-licensed beta release of a WordPress plugin that **enhances the built-in File (`core/file`) block** rather than registering a competing uploader or modifying WordPress core.
 
 ## What changes
 
