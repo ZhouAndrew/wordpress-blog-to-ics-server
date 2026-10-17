@@ -8,11 +8,13 @@ This project is for developers and power users who already work with WordPress a
 
 ## Status
 
-**Pre-alpha / internal validation build**
+**Stable GitHub release: v0.2.0**
 
-Phase 2 has moved the main publish workflow into the `wp_log_parser` package and CLI. The repository is still **not public-alpha ready** until the maintainer completes a fresh-clone validation run against a real WordPress source and, optionally, a real CalDAV collection.
+The repository publishes three independent components: WordPress Blog → ICS / CalDAV, the standalone Inbox Watcher, and the HTML File Preview WordPress plugin. Automated Python tests, package checks, and a disposable WordPress integration test gate the release.
 
-## Before v0.1.0-alpha
+**Important limitation:** the Inbox Watcher's upload-and-attach flow has not yet been acceptance-tested against the maintainer's real WordPress host. "Stable" refers to the GitHub release channel; production installation still requires a test upload and checking the target diary post.
+
+## Historical preparation checklist: before v0.1.0-alpha
 
 ### CI-covered gates
 
@@ -557,7 +559,7 @@ It does not change the WordPress → ParsedDayLog → ICS / CalDAV pipeline.
 publishes uploads to WordPress. Try it with a disposable inbox and test WordPress
 site before using personal files. `key.txt`, `work/` and `trash/` are ignored.
 
-## Coordinated preview bundle (v0.2.0-beta.3)
+## Coordinated stable release bundle (v0.2.0)
 
 This repository ships three independent components with different installation paths:
 
@@ -565,6 +567,6 @@ This repository ships three independent components with different installation p
 - **Inbox Watcher 0.3.1**: standalone `tools/wp-inbox-watcher/wp_inbox_watcher.py` for direct `python3` execution; optional graphical status and source-preserving .zip/.tar.gz fallback for rejected uploads and directories.
 - **HTML File Preview 0.1.0**: installable `html-file-preview-0.1.0.zip` WordPress plugin; see `wordpress-plugin/html-file-preview/README.md`.
 
-Build packages locally with `bash scripts/package-release.sh v0.2.0-beta.3` on a clean main checkout and `bash tools/wp-inbox-watcher/package.sh`. A branch named `publish/v0.2.0-beta.3` initiates the GitHub Actions release gate, which reruns tests and publishes each artifact in one **pre-release**.
+Build packages locally with `bash scripts/package-release.sh v0.2.0` on a clean main checkout and `bash tools/wp-inbox-watcher/package.sh`. The release branch `publish/v0.2.0` triggers GitHub Actions, reruns tests and publishes each component as an asset in a **stable release**. Version numbers of the separately shipped plugins/tools remain independent.
 
 Security: never distribute `key.txt`, WordPress Application Passwords, `config.json`, or inbox `work/` and `trash/`. The independent uploader still requires real-site verification with disposable files before production use.
