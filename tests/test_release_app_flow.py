@@ -175,7 +175,7 @@ def test_health_summary_warning_for_parser_warning(capsys):
 
 def test_readme_keeps_license_debugging_and_getting_started():
     text = open("README.md", encoding="utf-8").read()
-    assert "Pre-alpha / internal validation build" in text
+    assert "Stable GitHub release: v0.2.0" in text
     assert "## Before v0.1.0-alpha" in text
     assert "## License" in text
     assert "## Debugging" in text
