@@ -2,7 +2,7 @@
 /**
  * Plugin Name: HTML File Preview
  * Description: Adds an inline HTML preview to WordPress's built-in File block without replacing its download link.
- * Version: 0.1.0
+ * Version: 0.1.0-beta.1
  * Requires at least: 6.4
  * Requires PHP: 7.4
  * License: MIT
@@ -109,7 +109,7 @@ function hfp_enqueue_editor() {
         'hfp-editor',
         plugins_url( 'assets/editor.js', __FILE__ ),
         array( 'wp-block-editor', 'wp-compose', 'wp-data', 'wp-element', 'wp-hooks', 'wp-i18n' ),
-        '0.1.0',
+        '0.1.0-beta.1',
         true
     );
     hfp_enqueue_styles();
@@ -117,6 +117,6 @@ function hfp_enqueue_editor() {
 add_action( 'enqueue_block_editor_assets', 'hfp_enqueue_editor' );
 
 function hfp_enqueue_styles() {
-    wp_enqueue_style( 'hfp-preview', plugins_url( 'assets/preview.css', __FILE__ ), array(), '0.1.0' );
+    wp_enqueue_style( 'hfp-preview', plugins_url( 'assets/preview.css', __FILE__ ), array(), '0.1.0-beta.1' );
 }
 add_action( 'wp_enqueue_scripts', 'hfp_enqueue_styles' );
