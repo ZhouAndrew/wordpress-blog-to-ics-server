@@ -82,3 +82,41 @@ WP-Inbox/
 python3 -m unittest discover -s tests -v
 python3 -m py_compile wp_inbox_watcher.py
 ```
+
+
+## v0.3.0: ZIP / tar.gz wrapping of folders and rejected file types
+
+This version replaces the previous per-file folder uploads: each **new folder** is
+archived as a single file, preserving its full directory tree and original name,
+including extensions. For example, `Folder.ics/` becomes `Folder.ics.zip`.
+
+- A `.xpi` file becomes `extension.xpi.zip` by default. No global WordPress MIME
+  rules are loosened and no temporary PHP upload filter is injected.
+- Other disallowed file types are retried once inside a ZIP when WordPress returns
+  an explicit file-type rejection. Authentication and network failures are not
+  retried as ZIPs.
+- An optional `--archive-format tar.gz` makes archives such as
+  `extension.xpi.tar.gz` and `Folder.tar.gz`.
+- Successful originals are preserved under `trash/<job-id>/`, with temporary
+  archives removed from `work/archives/`. Failed work stays in
+  `work/inflight/` for recovery.
+- Previously partially processed v0.2 folder jobs retain their existing
+  per-file checkpoints; only newly claimed folders use the single-archive format.
+- `work/debug.log` records archive creation, WordPress errors, media IDs and
+  write/readback verification. Symlinks and special files are rejected rather
+  than silently packaged.
+
+### Run the standalone CPython file
+
+```bash
+python3 tools/wp-inbox-watcher/wp_inbox_watcher.py ~/Desktop/outbox
+python3 tools/wp-inbox-watcher/wp_inbox_watcher.py ~/Desktop/outbox --archive-format tar.gz
+```
+
+When Tkinter is unavailable, the standalone script can **ask** before using apt
+to install it. In headless mode pass `--no-gui`.
+
+The program writes to real WordPress posts. Verify first with a test site and
+disposable inbox. A WordPress site that rejects both normal media uploads and
+ZIP/gzip uploads still cannot accept the archive; the source remains in work.
+

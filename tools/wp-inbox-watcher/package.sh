@@ -13,7 +13,7 @@ from sys import argv
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 src, outdir = map(Path, argv[1:])
-archive = outdir / "wordpress-inbox-watcher-v0.2.zip"
+archive = outdir / "wordpress-inbox-watcher-v0.3.0.zip"
 members = [
     "run.sh", "README.md", "wp_inbox_watcher.py", ".gitignore",
     "tests/test_watcher.py", "tests/test_launcher.py",

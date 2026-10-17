@@ -6,6 +6,7 @@ import argparse
 import base64
 import datetime as dt
 import getpass
+import io
 import hashlib
 import html
 import http.client
@@ -19,6 +20,7 @@ import re
 import shutil
 import ssl
 import stat
+import tarfile
 import subprocess
 import sys
 import threading
@@ -26,6 +28,7 @@ import time
 from typing import Any
 import urllib.parse
 import uuid
+import zipfile
 
 try:
     import tkinter as tk
@@ -38,10 +41,146 @@ TEMP_SUFFIXES = (".part", ".partial", ".tmp", ".crdownload", ".swp", "~")
 APP_NAME = "WordPress Inbox Watcher"
 INSTRUCTIONS = (
     "WordPress Inbox Watcher：监视一个可读写目录，将新文件或文件夹中的文件按原始修改时间"
-    "上传并追加到相应日期的 WordPress 日志文章。work 和 trash 不会被监视；"
+    "上传并追加到相应日期的 WordPress 日志文章。文件夹整体打包，禁止的文件类型打包后重试；"
+    "压缩包名保留原始后缀（例如 plugin.xpi.zip）。work 和 trash 不会被监视；"
     "成功文件移入 trash，失败任务保留在 work。最新消息在窗口和终端显示，"
     "详细调试日志保存在 work/debug.log。"
 )
+
+
+def ensure_tkinter(argv: list[str] | None = None) -> bool:
+    """Optionally install python3-tk when launching this single .py file.
+
+    Only attempts apt on an interactive user-confirmed request.  Never elevates
+    the watcher itself, and never mutates the filesystem in --no-gui mode.
+    """
+    if tk is not None:
+        return True
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if any(arg in ("--no-gui", "--help", "-h") for arg in argv):
+        return False
+    print("图形界面需要 python3-tk。", file=sys.stderr)
+    if not shutil.which("apt-get"):
+        print("未找到 apt-get；请安装对应发行版的 tkinter，或使用 --no-gui。", file=sys.stderr)
+        return False
+    approved = False
+    if sys.stdin.isatty():
+        try:
+            reply = input("是否自动安装 python3-tk？需要管理员授权。[y/N] ")
+            approved = reply.strip().casefold() in ("y", "yes", "是")
+        except EOFError:
+            approved = False
+    elif shutil.which("zenity") and (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        try:
+            approved = subprocess.run(["zenity", "--question", "--title=WordPress Inbox Watcher",
+                                     "--text=缺少 python3-tk。现在安装吗？需要管理员授权。"],
+                                     timeout=120, check=False).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            pass
+    if not approved:
+        print("未安装 Tkinter；可执行：sudo apt-get install python3-tk", file=sys.stderr)
+        return False
+    if os.geteuid() == 0:
+        command = ["apt-get", "install", "-y", "python3-tk"]
+    elif sys.stdin.isatty() and shutil.which("sudo"):
+        command = ["sudo", "apt-get", "install", "-y", "python3-tk"]
+    elif shutil.which("pkexec"):
+        command = ["pkexec", "apt-get", "install", "-y", "python3-tk"]
+    else:
+        print("无法申请系统权限，请手动运行 sudo apt-get install python3-tk", file=sys.stderr)
+        return False
+    try:
+        subprocess.run(command, check=True, timeout=600)
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"安装 python3-tk 失败：{exc}", file=sys.stderr)
+        return False
+    # Python imports can be cached, and a venv may not see distro packages.
+    # Re-execute only after a verified interpreter can actually import tkinter.
+    candidates = [sys.executable, "/usr/bin/python3"]
+    for python in dict.fromkeys(candidates):
+        if not Path(python).is_file():
+            continue
+        try:
+            ok = subprocess.run([python, "-c", "import tkinter"], timeout=10,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if ok:
+            os.execv(python, [python, str(Path(__file__).resolve()), *argv])
+    print("安装后仍不能加载 Tkinter；请使用 --no-gui。", file=sys.stderr)
+    return False
+
+
+# These suffixes commonly fail WordPress' default upload policy.
+# ZIP wrapping is preferable to relaxing the server's MIME safety rules.
+PREPACK_SUFFIXES = {".xpi"}
+
+
+def rejected_file_type(error: Exception) -> bool:
+    """Recognize WordPress file-type errors, but not unrelated auth/network failures."""
+    message = str(error).casefold()
+    return bool(re.search(
+        r"file[ -]?type|mime[ -]?type|invalid_file_type|upload_filetype|"
+        r"文件类型|不允许上传此类文件|不支持的文件格式",
+        message
+    ) and any(term in message for term in (
+        "not allowed", "not permitted", "not supported", "not accepted",
+        "invalid", "prohibited", "unsupported", "blocked", "security",
+        "sorry", "不允许", "不支持", "拒绝", "禁止", "无效", "安全",
+    )))
+
+
+def archive_filename(original_name: str, archive_format: str) -> str:
+    """Append the archive extension *after* the complete original name."""
+    if archive_format not in ("zip", "tar.gz"):
+        raise ValueError("archive format must be zip or tar.gz")
+    return original_name + "." + archive_format
+
+
+def create_upload_archive(source: Path, target: Path, archive_format: str) -> Path:
+    """Create one atomic archive, keeping original names and directory hierarchy.
+
+    Reject symlinks and special files, including inside directories.  The archive
+    lives outside the watched inbox; its creation cannot re-trigger processing.
+    """
+    if source.is_symlink() or not (source.is_file() or source.is_dir()):
+        raise RuntimeError(f"无法安全打包此目录项: {source}")
+    if target.exists() and (target.is_symlink() or not target.is_file()):
+        raise RuntimeError(f"压缩包目标路径异常: {target}")
+    members = [source]
+    if source.is_dir():
+        members.extend(sorted(source.rglob("*"), key=lambda p: p.as_posix()))
+    for item in members:
+        if item.is_symlink() or not (item.is_file() or item.is_dir()):
+            raise RuntimeError(f"文件夹中包含符号链接或特殊文件，拒绝打包: {item}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temp = target.with_name(target.name + ".partial-" + uuid.uuid4().hex)
+    try:
+        if archive_format == "zip":
+            with zipfile.ZipFile(temp, "w", compression=zipfile.ZIP_DEFLATED,
+                                 allowZip64=True) as archive:
+                for item in members:
+                    archive.write(item, arcname=item.relative_to(source.parent).as_posix())
+        elif archive_format == "tar.gz":
+            with tarfile.open(temp, mode="w:gz") as archive:
+                for item in members:
+                    archive.add(item, arcname=item.relative_to(source.parent).as_posix(),
+                                recursive=False)
+        else:
+            raise ValueError(f"不支持的打包格式: {archive_format}")
+        temp.replace(target)
+    finally:
+        temp.unlink(missing_ok=True)
+    return target
+
+
+def upload_error_hint(error: Exception, filename: str, backend: Any) -> str:
+    """Display upload failures in the message window and the debug log."""
+    detail = str(error)
+    if rejected_file_type(error):
+        detail += ("；WordPress 拒绝了该文件类型（包括可能的压缩包）。"
+                   "原始文件保留在 work 中；请检查站点允许的 zip/gz 类型并重试。")
+    return detail
 
 
 def local_time(timestamp: float) -> dt.datetime:
@@ -166,7 +305,8 @@ class EventHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
-            self.q.put_nowait((record.levelname, self.format(record)))
+            # Send concise latest messages to Tk; full tracebacks go to debug.log.
+            self.q.put_nowait((record.levelname, f"{record.levelname}: {record.getMessage()}"))
         except Exception:
             pass
 
@@ -286,7 +426,7 @@ class WpCliBackend:
         cmd = [self.binary, f"--path={self.wp_path}", *args]
         self.log.debug("WP-CLI call: %r", cmd)
         run = subprocess.run(cmd, capture_output=True, text=True,
-                             timeout=1200 if args and args[0] == "media" else 180)
+                             timeout=1200 if "media" in args else 180)
         if run.returncode:
             raise RuntimeError("WP-CLI failed: " + run.stderr[-2500:])
         return run.stdout.strip()
@@ -315,11 +455,13 @@ class WpCliBackend:
         return self._post_cache[key]
 
     def upload(self, path: Path, post_id: int, mime: str) -> tuple[int, str]:
-        answer = self.call("media", "import", str(path), f"--post_id={post_id}", "--porcelain")
+        # Do not bypass WordPress file-type security: the processor archives
+        # unsupported content to .zip/.tar.gz before invoking this method.
+        answer = self.call("media", "import", str(path),
+                           f"--post_id={post_id}", "--porcelain")
         if not answer.isdecimal():
             raise RuntimeError("Unexpected media import response: " + answer)
         media_id = int(answer)
-        # Canonical attachment URL (more reliable than guid if domains have changed).
         try:
             url = self.call("eval", f"echo wp_get_attachment_url({media_id});")
         except Exception:
@@ -518,14 +660,19 @@ def configured_backend(args, root: Path, gui, log: logging.Logger):
 
 class InboxProcessor:
     """Single worker. Owns in-flight movement, checkpointing and WordPress writes."""
-    def __init__(self, root: Path, backend, log: logging.Logger):
+    def __init__(self, root: Path, backend, log: logging.Logger, archive_format: str = 'zip'):
         self.root, self.backend, self.log = root, backend, log
+        if archive_format not in ('zip', 'tar.gz'):
+            raise ValueError('archive_format must be zip or tar.gz')
+        self.archive_format = archive_format
+        self.archives = root / 'work' / 'archives'
         self.work = root / "work"
         self.inflight = self.work / "inflight"
         self.jobs = self.work / "jobs"
         self.trash = root / "trash"
         self.inflight.mkdir(exist_ok=True)
         self.jobs.mkdir(exist_ok=True)
+        self.archives.mkdir(exist_ok=True)
         self.queue: queue.Queue[str | None] = queue.Queue()
         self.pending: set[str] = set()
         self.lock = threading.Lock()
@@ -572,8 +719,10 @@ class InboxProcessor:
                     self.accept(self.root / item[4:])
                 else:
                     self.process(item[4:])
-            except Exception:
-                self.log.exception("处理失败：保留 work 中任务或原始文件，等待重试: %s", item)
+            except Exception as exc:
+                filename = item[4:] if item.startswith("new:") else item
+                self.log.error("处理失败: %s。%s；保留在 work，点击“重试”可恢复",
+                               filename, upload_error_hint(exc, filename, self.backend), exc_info=True)
             finally:
                 with self.lock:
                     self.pending.discard(item)
@@ -590,7 +739,8 @@ class InboxProcessor:
         stamped = local_time(path.stat().st_mtime).isoformat()
         job = {"id": job_id, "original": path.name, "captured_mtime": stamped,
                "root_mtime": path.stat().st_mtime, "payload": path.name,
-               "status": "claimed", "uploaded": {}, "done": []}
+               "status": "claimed", "uploaded": {}, "done": [],
+               "archive_format": self.archive_format}
         receipt = self.jobs / (job_id + ".json")
         write_json(receipt, job)
         task_dir = self.inflight / job_id
@@ -617,6 +767,7 @@ class InboxProcessor:
                 or job.get("original") != job["payload"]):
             raise RuntimeError("任务记录损坏或包含目录穿越")
         if job.get("status") == "done" and (self.trash / job_id / job["payload"]).exists():
+            shutil.rmtree(self.archives / job_id, ignore_errors=True)
             return
         task_dir = self.inflight / job_id
         if task_dir.is_symlink():
@@ -624,63 +775,117 @@ class InboxProcessor:
         task_dir.mkdir(exist_ok=True)
         payload = task_dir / job["payload"]
         if not payload.exists():
-            # If crash occurred after manifest creation but before moving the source, claim now.
+            # Recover after receipt creation but before moving the original.
             original = self.root / job["original"]
             if original.exists() and not original.is_symlink():
                 original.rename(payload)
             elif job.get("status") == "done":
                 return
             elif (self.trash / job_id / job["payload"]).exists():
-                # Crash between archive rename and manifest completion.
                 job["status"] = "done"
                 write_json(receipt, job)
+                shutil.rmtree(self.archives / job_id, ignore_errors=True)
                 self.log.info("已修复中断的归档任务: %s", job["original"])
                 return
             else:
                 raise RuntimeError(f"无法恢复任务，源文件与 work 均缺失: {job_id}")
         if payload.is_symlink():
             raise RuntimeError("拒绝处理符号链接任务")
-        files = ([payload] if payload.is_file() else sorted(
-            (f for f in payload.rglob("*") if f.is_file() or f.is_symlink()),
-            key=lambda p: (p.stat(follow_symlinks=False).st_mtime, str(p))))
-        if not files:
-            self.log.info("空文件夹，直接移到 trash: %s", job["original"])
+        package_format = job.get("archive_format", self.archive_format)
+        if package_format not in ("zip", "tar.gz"):
+            raise RuntimeError(f"任务记录中的压缩格式不合法: {package_format}")
+
+        # New folders are uploaded AS ONE archive, including empty directories.
+        # Old partially processed folder jobs keep their per-file checkpoints,
+        # preventing re-upload of files which were already attached by v0.2.
+        legacy_folder = payload.is_dir() and (
+            any("/" in key for key in job.get("uploaded", {}))
+            or any("/" in key for key in job.get("done", []))
+        )
+        if payload.is_file() or not legacy_folder:
+            files = [payload]
+        else:
+            self.log.warning("恢复旧版逐文件处理的文件夹任务: %s", job["original"])
+            files = sorted((f for f in payload.rglob("*") if f.is_file() or f.is_symlink()),
+                           key=lambda p: (p.lstat().st_mtime, str(p)))
+            if not files:
+                self.log.info("旧任务中的空文件夹，直接移至 trash: %s", job["original"])
+
         for file in files:
             if file.is_symlink():
                 raise RuntimeError(f"文件夹中有符号链接，拒绝上传: {file}")
             rel = ((job["original"] + "/" + file.relative_to(payload).as_posix())
-                   if payload.is_dir() else job["original"])
+                   if legacy_folder else job["original"])
             if rel in job["done"]:
                 continue
-            # File timestamps survived rename; original root timestamp was captured before it moved.
-            stamp = job["root_mtime"] if payload.is_file() else file.stat().st_mtime
+            stamp = (file.stat().st_mtime if legacy_folder else job["root_mtime"])
             when = local_time(stamp)
             post_id = self.backend.post_for_day(when)
-            category, mime = classify(file)
-            self.log.info("上传 %s [%s, %s] → %s (Post %s)", rel, category, when.isoformat(), when.date(), post_id)
+            category, mime = classify(file) if file.is_file() else ("file", "application/zip")
             already = job["uploaded"].get(rel)
             if already:
                 media_id, url = int(already["id"]), str(already["url"])
+                upload_name = already.get("filename", file.name)
+                upload_category = already.get("category", category)
+                self.log.info("继续先前已上传的附件: %s → %s", rel, upload_name)
             else:
-                media_id, url = self.backend.upload(file, post_id, mime)
-                job["uploaded"][rel] = {"id": media_id, "url": url}
+                packaged = file.is_dir() or file.suffix.lower() in PREPACK_SUFFIXES
+                upload_path, upload_category, upload_mime = file, category, mime
+                upload_dir = self.archives / job_id
+
+                def pack() -> tuple[Path, str, str]:
+                    # Preserve relative path in staging to avoid basename collisions
+                    # when recovering a legacy folder with two same-named files.
+                    dest = (upload_dir / rel).with_name(
+                        archive_filename(file.name, package_format))
+                    self.log.info("打包 %s → %s（保留原名称和后缀）", rel, dest.name)
+                    create_upload_archive(file, dest, package_format)
+                    archive_mime = ("application/zip" if package_format == "zip"
+                                    else "application/x-gzip")
+                    self.log.debug("Archive prepared source=%s archive=%s size=%d bytes",
+                                   file, dest, dest.stat().st_size)
+                    return dest, "file", archive_mime
+
+                if packaged:
+                    upload_path, upload_category, upload_mime = pack()
+                self.log.info("上传 %s [%s, %s] → %s (Post %s)",
+                              upload_path.name, upload_category, when.isoformat(),
+                              when.date(), post_id)
+                try:
+                    media_id, url = self.backend.upload(upload_path, post_id, upload_mime)
+                except Exception as exc:
+                    if packaged or not rejected_file_type(exc):
+                        raise
+                    # A site can restrict additional types: retry with a standard
+                    # archive, not a dangerous global upload_mimes exemption.
+                    self.log.warning("WordPress 不允许直接上传 %s，改为压缩包后重试: %s",
+                                     rel, str(exc)[:500])
+                    upload_path, upload_category, upload_mime = pack()
+                    media_id, url = self.backend.upload(upload_path, post_id, upload_mime)
+                upload_name = upload_path.name
+                job["uploaded"][rel] = {"id": media_id, "url": url,
+                                        "filename": upload_name, "category": upload_category}
                 write_json(receipt, job)
-                self.log.debug("WordPress uploaded %s attachment_id=%s url=%s", rel, media_id, url)
+                self.log.debug("WordPress uploaded %s attachment_id=%s url=%s",
+                               upload_name, media_id, url)
             token = hashlib.sha256((job_id + ":" + rel).encode("utf-8")).hexdigest()
             marker = "wpi-" + token[:32]
             current = self.backend.get_content(post_id)
             if marker in current:
                 self.log.info("检测到已追加的 WordPress 区块，跳过重复追加: %s", rel)
             else:
-                block = gutenberg_block(category, media_id, url, file.name, token, when, rel)
+                title = rel if upload_name == file.name else f"{rel} → {upload_name}"
+                block = gutenberg_block(upload_category, media_id, url, upload_name,
+                                        token, when, title)
                 self.backend.set_content(post_id, append_blocks(current, block))
                 verify = self.backend.get_content(post_id)
                 if marker not in verify:
                     raise RuntimeError(f"WordPress 写入后回读未找到 marker: {marker}")
-                self.log.debug("WordPress content write-readback verified: post=%s marker=%s", post_id, marker)
+                self.log.debug("WordPress content write-readback verified: post=%s marker=%s",
+                               post_id, marker)
             job["done"].append(rel)
             write_json(receipt, job)
-            self.log.info("已完成 %s | 分类 %s | 附件 %s", rel, category, media_id)
+            self.log.info("已完成 %s | 已上传 %s | 附件 %s", rel, upload_name, media_id)
         target = self.trash / job_id
         if target.exists():
             raise RuntimeError(f"trash 中已有同名任务目标: {target}")
@@ -688,6 +893,7 @@ class InboxProcessor:
         job["status"] = "done"
         job["archived_at"] = dt.datetime.now().astimezone().isoformat()
         write_json(receipt, job)
+        shutil.rmtree(self.archives / job_id, ignore_errors=True)
         self.log.info("任务完成，已移至 trash: %s", job["original"])
 
     def shutdown(self):
@@ -835,6 +1041,8 @@ def build_parser():
     p.add_argument("--allow-insecure-cert", action="store_true", help="仅在本地可信站点临时跳过 HTTPS 证书验证")
     p.add_argument("--interval", type=float, default=2.0, help="扫描间隔秒数，默认 2")
     p.add_argument("--quiet", type=float, default=4.0, help="文件连续不变的秒数，默认 4")
+    p.add_argument("--archive-format", choices=("zip", "tar.gz"), default="zip",
+                   help="文件夹或被 WordPress 拒绝的文件的打包格式，默认 zip")
     return p
 
 
@@ -842,6 +1050,8 @@ def main(argv=None):
     args = build_parser().parse_args(argv)
     if args.interval <= 0 or args.quiet <= 0:
         raise SystemExit("--interval / --quiet must be positive")
+    if not args.no_gui and tk is None:
+        ensure_tkinter(list(sys.argv[1:] if argv is None else argv))
     print(INSTRUCTIONS, flush=True)
     ui = None
     if not args.no_gui and tk:
@@ -882,7 +1092,9 @@ def main(argv=None):
             messagebox.showerror(APP_NAME + " 配置失败", str(ex), parent=ui)
             ui.destroy()
         return 3
-    processor = InboxProcessor(inbox, backend, log)
+    processor = InboxProcessor(inbox, backend, log, archive_format=args.archive_format)
+    log.info("打包规则：文件夹整体打包；被拒绝的文件自动打包；格式=%s；保留完整原始名称及后缀",
+             args.archive_format)
     watcher = PollWatcher(inbox, processor, log, interval=args.interval, quiet=args.quiet)
     processor.start()
     processor.recover()

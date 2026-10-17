@@ -1,0 +1,144 @@
+name: Publish all WordPress project artifacts
+on:
+  push:
+    branches:
+      - 'publish/**'
+permissions:
+  contents: write
+jobs:
+  validate-package-publish:
+    if: github.repository == 'ZhouAndrew/wordpress-blog-to-ics-server'
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: html_preview_wp
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mysqli, mbstring, xml
+          tools: none
+          coverage: none
+      - name: Verify release ref and checkout branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(printf '%s' "$GITHUB_REF_NAME" | sed 's@^publish/@@')"
+          if [[ "$GITHUB_REF_NAME" != "publish/$VERSION" ]] ||
+             [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release branch: $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+          git checkout -B "$GITHUB_REF_NAME" "$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "RELEASE_BRANCH=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
+      - name: Run all Python tests
+        run: |
+          python -m pip install -r requirements.txt pytest
+          python -m pytest -q
+          python -m py_compile tools/wp-inbox-watcher/wp_inbox_watcher.py
+          bash -n tools/wp-inbox-watcher/run.sh
+          bash -n tools/wp-inbox-watcher/package.sh
+      - name: WordPress plugin static tests
+        run: |
+          php -l wordpress-plugin/html-file-preview/html-file-preview.php
+          php wordpress-plugin/html-file-preview/tests/unit.php
+          node wordpress-plugin/html-file-preview/tests/editor.test.cjs
+      - name: Install plugin on disposable WordPress test site
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          (cd wordpress-plugin && zip -q -r ../dist/html-file-preview-0.1.0.zip html-file-preview -x 'html-file-preview/tests/*')
+          unzip -p dist/html-file-preview-0.1.0.zip html-file-preview/html-file-preview.php | grep -F 'Plugin Name: HTML File Preview'
+          curl -fsSL --retry 3 https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar -o /tmp/wp-cli.phar
+          php /tmp/wp-cli.phar --info
+          WPROOT="$RUNNER_TEMP/wordpress-test"
+          php /tmp/wp-cli.phar core download --path="$WPROOT" --locale=en_US
+          php /tmp/wp-cli.phar config create --path="$WPROOT" --dbname=html_preview_wp --dbuser=root --dbpass=root --dbhost=127.0.0.1
+          php /tmp/wp-cli.phar core install --path="$WPROOT" --url=http://localhost:8888 --title=PreviewTest --admin_user=admin --admin_password=TestPassword123! --admin_email=test@example.org --skip-email
+          php /tmp/wp-cli.phar plugin install "$GITHUB_WORKSPACE/dist/html-file-preview-0.1.0.zip" --activate --path="$WPROOT"
+          php /tmp/wp-cli.phar eval-file wordpress-plugin/html-file-preview/tests/wordpress-integration.php --path="$WPROOT"
+      - name: Build all distribution archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHON_BIN=python bash scripts/package-release.sh "$VERSION"
+          bash tools/wp-inbox-watcher/package.sh
+          unzip -l dist/wordpress-inbox-watcher-v0.3.0.zip
+          unzip -p dist/wordpress-inbox-watcher-v0.3.0.zip wp-inbox-watcher/wp_inbox_watcher.py | grep -q -- "--archive-format"
+          (cd dist && sha256sum wordpress-inbox-watcher-v0.3.0.zip html-file-preview-0.1.0.zip >> SHA256SUMS && sha256sum -c SHA256SUMS)
+      - name: Prepare release notes and checksum
+        shell: bash
+        run: |
+          cat > dist/RELEASE-NOTES.md <<'NOTES'
+          # Coordinated WordPress project preview release
+
+          This pre-release contains three projects:
+
+          1. WordPress Blog to ICS / CalDAV: full repository source archive including CLI, parser, exporter, synchronization and tests.
+          2. WordPress Inbox Watcher 0.3.0: standalone Python + Tkinter watcher; folders and rejected file types are uploaded as ZIP or tar.gz, preserving original suffixes; debug logs and recovery.
+          3. HTML File Preview 0.1.0: installable WordPress plugin ZIP.
+
+          The watcher has passed automated simulated uploads but not real WordPress upload acceptance on the maintainer's host. Plugin installation/integration is tested on a disposable WordPress server in CI. This is a pre-release and not a certification of production readiness.
+
+          Runtime secrets and private files are not distributed.
+          NOTES
+          (cd dist && sha256sum RELEASE-NOTES.md >> SHA256SUMS && sha256sum -c SHA256SUMS)
+      - name: Archive all build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: all-wordpress-projects-preview
+          path: |
+            dist/wordpress-blog-to-ics-server-*.tar.gz
+            dist/wordpress-blog-to-ics-server-*.zip
+            dist/wordpress-inbox-watcher-v0.3.0.zip
+            dist/html-file-preview-0.1.0.zip
+            dist/RELEASE-METADATA.txt
+            dist/RELEASE-NOTES.md
+            dist/SHA256SUMS
+          if-no-files-found: error
+      - name: Publish GitHub pre-release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --tags origin "refs/tags/$VERSION" >/dev/null 2>&1; then
+            git fetch --tags origin
+            test "$(git rev-list -n 1 "$VERSION")" = "$GITHUB_SHA" || {
+              echo "Tag $VERSION points to a different commit" >&2
+              exit 1
+            }
+          else
+            git tag "$VERSION" "$GITHUB_SHA"
+            git push origin "refs/tags/$VERSION"
+          fi
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release upload "$VERSION" dist/*.zip dist/*.tar.gz dist/RELEASE-METADATA.txt dist/RELEASE-NOTES.md dist/SHA256SUMS --clobber
+            gh release edit "$VERSION" --prerelease --notes-file dist/RELEASE-NOTES.md
+          else
+            gh release create "$VERSION" dist/*.zip dist/*.tar.gz dist/RELEASE-METADATA.txt dist/RELEASE-NOTES.md dist/SHA256SUMS --verify-tag --prerelease --title "WordPress tools $VERSION" --notes-file dist/RELEASE-NOTES.md
+          fi
