@@ -85,9 +85,9 @@ jobs:
           set -euo pipefail
           PYTHON_BIN=python bash scripts/package-release.sh "$VERSION"
           bash tools/wp-inbox-watcher/package.sh
-          unzip -l dist/wordpress-inbox-watcher-v0.3.0.zip
-          unzip -p dist/wordpress-inbox-watcher-v0.3.0.zip wp-inbox-watcher/wp_inbox_watcher.py | grep -q -- "--archive-format"
-          (cd dist && sha256sum wordpress-inbox-watcher-v0.3.0.zip html-file-preview-0.1.0.zip >> SHA256SUMS && sha256sum -c SHA256SUMS)
+          unzip -l dist/wordpress-inbox-watcher-v0.3.1.zip
+          unzip -p dist/wordpress-inbox-watcher-v0.3.1.zip wp-inbox-watcher/wp_inbox_watcher.py | grep -q -- "--archive-format"
+          (cd dist && sha256sum wordpress-inbox-watcher-v0.3.1.zip html-file-preview-0.1.0.zip >> SHA256SUMS && sha256sum -c SHA256SUMS)
       - name: Prepare release notes and checksum
         shell: bash
         run: |
@@ -97,7 +97,7 @@ jobs:
           This pre-release contains three projects:
 
           1. WordPress Blog to ICS / CalDAV: full repository source archive including CLI, parser, exporter, synchronization and tests.
-          2. WordPress Inbox Watcher 0.3.0: standalone Python + Tkinter watcher; folders and rejected file types are uploaded as ZIP or tar.gz, preserving original suffixes; debug logs and recovery.
+          2. WordPress Inbox Watcher 0.3.1: standalone Python + Tkinter watcher; folders and rejected file types are uploaded as ZIP or tar.gz, preserving original suffixes; debug logs and recovery.
           3. HTML File Preview 0.1.0: installable WordPress plugin ZIP.
 
           The watcher has passed automated simulated uploads but not real WordPress upload acceptance on the maintainer's host. Plugin installation/integration is tested on a disposable WordPress server in CI. This is a pre-release and not a certification of production readiness.
@@ -112,7 +112,7 @@ jobs:
           path: |
             dist/wordpress-blog-to-ics-server-*.tar.gz
             dist/wordpress-blog-to-ics-server-*.zip
-            dist/wordpress-inbox-watcher-v0.3.0.zip
+            dist/wordpress-inbox-watcher-v0.3.1.zip
             dist/html-file-preview-0.1.0.zip
             dist/RELEASE-METADATA.txt
             dist/RELEASE-NOTES.md
