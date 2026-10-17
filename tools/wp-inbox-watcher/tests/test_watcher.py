@@ -31,6 +31,10 @@ class FakeWordPress:
         self.next_id += 1
         return self.next_id, f"https://example.test/uploads/{path.name}"
 
+    def ensure_media_parent(self, media_id, post_id):
+        self.parents = getattr(self, "parents", {})
+        self.parents[media_id] = post_id
+
     def get_content(self, post_id):
         return next(v["content"] for v in self.posts.values() if v["id"] == post_id)
 
@@ -112,6 +116,80 @@ class WpiTests(unittest.TestCase):
         self.assertIn("wp:file", content)
         self.assertFalse(folder.exists())
         self.assertEqual(len(list((self.root / "trash").iterdir())), 1)
+
+    def test_attach_to_today_and_preserve_source_mtime(self):
+        import datetime as dt
+        import os
+        target = self.root / "historical.pdf"
+        target.write_bytes(b"%PDF")
+        old = dt.datetime(2025, 3, 2, tzinfo=dt.timezone.utc).timestamp()
+        os.utime(target, (old, old))
+        self.processor.accept(target)
+        today = dt.datetime.now().astimezone().date().isoformat()
+        self.assertEqual(list(self.backend.posts), [today])
+        job = json.loads(next((self.root / "work/jobs").glob("*.json")).read_text())
+        self.assertEqual(job["uploaded"]["historical.pdf"]["post_id"], 1)
+        self.assertEqual(self.backend.parents[201], 1)
+        self.assertEqual(job["status"], "done")
+        self.assertIn("文件原修改日期", self.backend.posts[today]["content"])
+
+    def test_explicit_source_backfill_policy(self):
+        import datetime as dt
+        import os
+        self.processor.post_date = "source"
+        target = self.root / "old.txt"
+        target.write_text("data")
+        old = dt.datetime(2025, 3, 2, tzinfo=dt.timezone.utc).timestamp()
+        os.utime(target, (old, old))
+        self.processor.accept(target)
+        self.assertEqual(list(self.backend.posts), ["2025-03-02"])
+
+    def test_attached_media_verified_before_trash(self):
+        class ParentFailed(FakeWordPress):
+            def ensure_media_parent(self, media_id, post_id):
+                raise RuntimeError("post_parent readback mismatch")
+
+        self.processor.backend = ParentFailed()
+        target = self.root / "fail.pdf"
+        target.write_bytes(b"%PDF")
+        with self.assertRaisesRegex(RuntimeError, "post_parent"):
+            self.processor.accept(target)
+        job = json.loads(next((self.root / "work/jobs").glob("*.json")).read_text())
+        self.assertEqual(len(job["uploaded"]), 1)
+        self.assertEqual(job["done"], [])
+        self.assertTrue((self.root / "work/inflight" / job["id"] / job["payload"]).exists())
+        self.assertFalse((self.root / "trash" / job["id"]).exists())
+
+    def test_wordpress_cli_media_parent_readback(self):
+        backend = w.WpCliBackend("/usr/local/bin/wp", "/var/www/html/wordpress", self.logger)
+        current = {"parent": "0"}
+        seen = []
+        def call(*args):
+            seen.append(args)
+            if args[:2] == ("post", "get"):
+                return current["parent"]
+            if args[:2] == ("post", "update"):
+                current["parent"] = "14724"
+                return "Success"
+            raise AssertionError(args)
+        with patch.object(backend, "call", side_effect=call):
+            backend.ensure_media_parent(200, 14724)
+        self.assertEqual(current["parent"], "14724")
+        self.assertTrue(any("--post_parent=14724" in args for args in seen))
+
+    def test_rest_media_parent_readback(self):
+        backend = w.RestBackend("https://example.test", "user", "password", self.logger)
+        current = {"post": 0}
+        def request(method, endpoint, payload=None, **kwargs):
+            if method == "GET":
+                return {"post": current["post"]}
+            if method == "POST":
+                current["post"] = payload["post"]
+                return {"post": current["post"]}
+            raise AssertionError(method)
+        with patch.object(backend, "request", side_effect=request):
+            backend.ensure_media_parent(200, 14724)
+        self.assertEqual(current["post"], 14724)
 
     def test_xpi_archive_keeps_original_extension(self):
         file = self.root / "plugin.xpi"

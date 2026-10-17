@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Monitor an inbox and append uploaded media as Gutenberg blocks to dated WordPress posts."""
+"""Upload inbox media, attach it to daily WordPress posts, and verify the final blocks."""
 from __future__ import annotations
 
 import argparse
@@ -40,8 +40,9 @@ IGNORED_NAMES = {"work", "trash", "key.txt"}
 TEMP_SUFFIXES = (".part", ".partial", ".tmp", ".crdownload", ".swp", "~")
 APP_NAME = "WordPress Inbox Watcher"
 INSTRUCTIONS = (
-    "WordPress Inbox Watcher：监视一个可读写目录，将新文件或文件夹中的文件按原始修改时间"
-    "上传并追加到相应日期的 WordPress 日志文章。文件夹整体打包，禁止的文件类型打包后重试；"
+    "WordPress Inbox Watcher：监视可读写目录，上传文件或文件夹；默认关联到上传当天的 WordPress 日志文章。"
+    "需要历史补档时可以选择 --post-date source，按照文件原始修改日期归档。"
+    "文件夹整体打包，禁止的文件类型打包后重试；"
     "压缩包名保留原始后缀（例如 plugin.xpi.zip）。work 和 trash 不会被监视；"
     "成功文件移入 trash，失败任务保留在 work。最新消息在窗口和终端显示，"
     "详细调试日志保存在 work/debug.log。"
@@ -470,6 +471,17 @@ class WpCliBackend:
             raise RuntimeError("Invalid uploaded attachment URL: " + url)
         return media_id, url
 
+    def ensure_media_parent(self, media_id: int, post_id: int) -> None:
+        """Ensure WordPress media attachment belongs to the diary post; read back."""
+        parent = self.call("post", "get", str(media_id), "--field=post_parent")
+        if parent != str(post_id):
+            self.log.info("附件 %d 当前 post_parent=%s，设置为当天日志 %d", media_id, parent, post_id)
+            self.call("post", "update", str(media_id), f"--post_parent={post_id}")
+            parent = self.call("post", "get", str(media_id), "--field=post_parent")
+        if parent != str(post_id):
+            raise RuntimeError(f"附件关联验证失败：媒体 {media_id} post_parent={parent}，目标={post_id}")
+        self.log.info("附件关联成功（已回读验证）：媒体 ID %d → 日志 Post ID %d", media_id, post_id)
+
     def get_content(self, post_id: int) -> str:
         return self.call("post", "get", str(post_id), "--field=post_content")
 
@@ -588,10 +600,19 @@ class RestBackend:
         return self._post_cache[key]
 
     def upload(self, path: Path, post_id: int, mime: str) -> tuple[int, str]:
+        # The caller checkpoints the media ID before changing its post parent.
         result = self.request("POST", "/media", upload=path, content_type=mime)
-        media_id = int(result["id"])
-        self.request("POST", f"/media/{media_id}", {"post": post_id})
-        return media_id, str(result["source_url"])
+        return int(result["id"]), str(result["source_url"])
+
+    def ensure_media_parent(self, media_id: int, post_id: int) -> None:
+        current = self.request("GET", f"/media/{media_id}?context=edit")
+        if int(current.get("post") or 0) != post_id:
+            self.log.info("REST: 设置媒体 %d 的 parent post=%d", media_id, post_id)
+            self.request("POST", f"/media/{media_id}", {"post": post_id})
+            current = self.request("GET", f"/media/{media_id}?context=edit")
+        if int(current.get("post") or 0) != post_id:
+            raise RuntimeError(f"REST 附件关联验证失败：媒体 {media_id}，目标日志 {post_id}")
+        self.log.info("附件关联成功（已回读验证）：媒体 ID %d → 日志 Post ID %d", media_id, post_id)
 
     def get_content(self, post_id: int) -> str:
         result = self.request("GET", f"/posts/{post_id}?context=edit")
@@ -660,10 +681,14 @@ def configured_backend(args, root: Path, gui, log: logging.Logger):
 
 class InboxProcessor:
     """Single worker. Owns in-flight movement, checkpointing and WordPress writes."""
-    def __init__(self, root: Path, backend, log: logging.Logger, archive_format: str = 'zip'):
+    def __init__(self, root: Path, backend, log: logging.Logger, archive_format: str = 'zip',
+                 post_date: str = 'today'):
         self.root, self.backend, self.log = root, backend, log
         if archive_format not in ('zip', 'tar.gz'):
             raise ValueError('archive_format must be zip or tar.gz')
+        if post_date not in ('today', 'source'):
+            raise ValueError('post_date must be today or source')
+        self.post_date = post_date
         self.archive_format = archive_format
         self.archives = root / 'work' / 'archives'
         self.work = root / "work"
@@ -737,8 +762,10 @@ class InboxProcessor:
             raise RuntimeError(f"不支持的目录项: {path}")
         job_id = uuid.uuid4().hex
         stamped = local_time(path.stat().st_mtime).isoformat()
+        claimed_at = dt.datetime.now().astimezone().isoformat()
         job = {"id": job_id, "original": path.name, "captured_mtime": stamped,
-               "root_mtime": path.stat().st_mtime, "payload": path.name,
+               "root_mtime": path.stat().st_mtime, "claimed_at": claimed_at,
+               "date_policy": self.post_date, "payload": path.name,
                "status": "claimed", "uploaded": {}, "done": [],
                "archive_format": self.archive_format}
         receipt = self.jobs / (job_id + ".json")
@@ -819,12 +846,25 @@ class InboxProcessor:
             if rel in job["done"]:
                 continue
             stamp = (file.stat().st_mtime if legacy_folder else job["root_mtime"])
-            when = local_time(stamp)
+            source_when = local_time(stamp)
+            # Existing v0.2/v0.3 work receipts lack date_policy: preserve historical
+            # targeting for them, so recovery never redirects uploads to a new post.
+            policy = job.get("date_policy", "source")
+            if policy == "today":
+                when = dt.datetime.fromisoformat(job["claimed_at"])
+            elif policy == "source":
+                when = source_when
+            else:
+                raise RuntimeError(f"未知文章日期规则: {policy}")
             post_id = self.backend.post_for_day(when)
+            self.log.info("目标日志: %s (Post %d)，文件原修改时间: %s，模式=%s",
+                          when.date(), post_id, source_when.isoformat(), policy)
             category, mime = classify(file) if file.is_file() else ("file", "application/zip")
             already = job["uploaded"].get(rel)
             if already:
                 media_id, url = int(already["id"]), str(already["url"])
+                if already.get("post_id") is not None and int(already["post_id"]) != post_id:
+                    raise RuntimeError(f"恢复上传目标文章不一致：任务={already['post_id']}，当前={post_id}")
                 upload_name = already.get("filename", file.name)
                 upload_category = already.get("category", category)
                 self.log.info("继续先前已上传的附件: %s → %s", rel, upload_name)
@@ -863,11 +903,14 @@ class InboxProcessor:
                     upload_path, upload_category, upload_mime = pack()
                     media_id, url = self.backend.upload(upload_path, post_id, upload_mime)
                 upload_name = upload_path.name
-                job["uploaded"][rel] = {"id": media_id, "url": url,
+                job["uploaded"][rel] = {"id": media_id, "url": url, "post_id": post_id,
                                         "filename": upload_name, "category": upload_category}
                 write_json(receipt, job)
                 self.log.debug("WordPress uploaded %s attachment_id=%s url=%s",
                                upload_name, media_id, url)
+            # Media association and Gutenberg content are independent WordPress
+            # objects. Check BOTH before marking the job complete or trashing it.
+            self.backend.ensure_media_parent(media_id, post_id)
             token = hashlib.sha256((job_id + ":" + rel).encode("utf-8")).hexdigest()
             marker = "wpi-" + token[:32]
             current = self.backend.get_content(post_id)
@@ -875,14 +918,17 @@ class InboxProcessor:
                 self.log.info("检测到已追加的 WordPress 区块，跳过重复追加: %s", rel)
             else:
                 title = rel if upload_name == file.name else f"{rel} → {upload_name}"
+                if policy == "today" and source_when.date() != when.date():
+                    title += f"（文件原修改日期 {source_when.date()}）"
                 block = gutenberg_block(upload_category, media_id, url, upload_name,
                                         token, when, title)
                 self.backend.set_content(post_id, append_blocks(current, block))
-                verify = self.backend.get_content(post_id)
-                if marker not in verify:
-                    raise RuntimeError(f"WordPress 写入后回读未找到 marker: {marker}")
-                self.log.debug("WordPress content write-readback verified: post=%s marker=%s",
-                               post_id, marker)
+            verify = self.backend.get_content(post_id)
+            if marker not in verify or html.escape(url, quote=True) not in verify:
+                raise RuntimeError(f"WordPress 文章正文验证失败：post={post_id}，media={media_id}，marker={marker}")
+            self.backend.ensure_media_parent(media_id, post_id)
+            self.log.info("attach to 当天日志成功：媒体 %d → Post %d；正文区块已回读验证 (%s)",
+                          media_id, post_id, marker)
             job["done"].append(rel)
             write_json(receipt, job)
             self.log.info("已完成 %s | 已上传 %s | 附件 %s", rel, upload_name, media_id)
@@ -1043,6 +1089,8 @@ def build_parser():
     p.add_argument("--quiet", type=float, default=4.0, help="文件连续不变的秒数，默认 4")
     p.add_argument("--archive-format", choices=("zip", "tar.gz"), default="zip",
                    help="文件夹或被 WordPress 拒绝的文件的打包格式，默认 zip")
+    p.add_argument("--post-date", choices=("today", "source"), default="today",
+                   help="关联的日志日期：today=上传当天（默认）；source=文件原修改日期")
     return p
 
 
@@ -1092,9 +1140,12 @@ def main(argv=None):
             messagebox.showerror(APP_NAME + " 配置失败", str(ex), parent=ui)
             ui.destroy()
         return 3
-    processor = InboxProcessor(inbox, backend, log, archive_format=args.archive_format)
+    processor = InboxProcessor(inbox, backend, log, archive_format=args.archive_format,
+                               post_date=args.post_date)
     log.info("打包规则：文件夹整体打包；被拒绝的文件自动打包；格式=%s；保留完整原始名称及后缀",
              args.archive_format)
+    log.info("文章关联规则：%s；上传附件后验证 post_parent、追加 Gutenberg 区块并回读验证",
+             args.post_date)
     watcher = PollWatcher(inbox, processor, log, interval=args.interval, quiet=args.quiet)
     processor.start()
     processor.recover()

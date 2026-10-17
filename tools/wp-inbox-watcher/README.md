@@ -120,3 +120,36 @@ The program writes to real WordPress posts. Verify first with a test site and
 disposable inbox. A WordPress site that rejects both normal media uploads and
 ZIP/gzip uploads still cannot accept the archive; the source remains in work.
 
+
+
+## v0.3.1: explicitly attach uploaded files to today's diary post
+
+The default destination now is the **date the watcher claims the inbox item**,
+not the file's original modification date. The selected date is saved in
+`work/jobs/<id>.json` so restarts or midnight crossings cannot redirect an
+in-progress upload. The media's original modification timestamp remains available
+in the task receipt and, for older files, in the Gutenberg log paragraph.
+
+Both WordPress backends now verify the following before an item is archived:
+
+1. The media attachment's `post_parent` is the selected day's Post ID.
+2. The selected post's `post_content` includes the uploaded media URL and
+   the stable Gutenberg block marker (`wpi-...`), verified by reading it back.
+
+If attachment linking or content verification fails, the input stays in `work/`
+for retry. Uploaded media IDs are checkpointed, so retries do not upload the
+same file again.
+
+```bash
+# Default: today's dated WordPress journal
+python3 tools/wp-inbox-watcher/wp_inbox_watcher.py ~/Desktop/outbox
+
+# Optional historical backfill (previous default behavior)
+python3 tools/wp-inbox-watcher/wp_inbox_watcher.py ~/Desktop/outbox --post-date source
+```
+
+Existing unfinished jobs from v0.3.0 retain their historical target-post behavior
+to prevent accidentally reattaching already-uploaded media to a different day.
+The date selector follows the operating system's local timezone, so configure it
+consistently with the WordPress site's timezone. Only this repository's upload
+producer is changed; the existing ICS / CalDAV export pipeline is unchanged.
