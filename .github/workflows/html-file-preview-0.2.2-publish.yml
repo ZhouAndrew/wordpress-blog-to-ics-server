@@ -1,0 +1,176 @@
+name: HTML File Preview v0.2.2-beta.1 release
+
+on:
+  push:
+    branches:
+      - publish/html-file-preview-v0.2.2-beta.1
+    paths:
+      - .github/workflows/html-file-preview-0.2.2-publish.yml
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.repository == 'ZhouAndrew/wordpress-blog-to-ics-server'
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: html_preview_wp
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - name: Check out exact release candidate
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mysqli, mbstring, xml
+          tools: none
+          coverage: none
+
+      - name: Verify exact previously tested ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          PACKAGE="release-artifacts/html-file-preview-0.2.2-beta.1.zip"
+          printf '%s  %s\n' 'e7bca58a6081b1e81de586bc7c0f7fa8b918cfeb92f8828a7d35024628fe7a1d' "$PACKAGE" | sha256sum -c -
+          unzip -t "$PACKAGE"
+          unzip -p "$PACKAGE" html-file-preview/html-file-preview.php | grep -F 'Version: 0.2.2-beta.1'
+          unzip -p "$PACKAGE" html-file-preview/LICENSE | grep -F 'MIT License'
+
+      - name: Extract verified plugin source and update integration test
+        shell: bash
+        run: |
+          set -euo pipefail
+          unzip -o -q release-artifacts/html-file-preview-0.2.2-beta.1.zip -d wordpress-plugin
+          cat > wordpress-plugin/html-file-preview/tests/wordpress-integration.php <<'PHPEOF'
+          <?php
+          // Run with wp eval-file wordpress-plugin/html-file-preview/tests/wordpress-integration.php
+          if ( ! defined( 'ABSPATH' ) || ! function_exists( 'do_blocks' ) ) {
+              fwrite( STDERR, "This test must run inside WordPress.\n" );
+              exit( 1 );
+          }
+          function hfp_wp_assert( $okay, $message ) {
+              if ( ! $okay ) {
+                  WP_CLI::error( $message );
+              }
+              WP_CLI::log( 'PASS: ' . $message );
+          }
+          hfp_wp_assert( function_exists( 'hfp_preview_url' ), 'plugin loaded' );
+          hfp_wp_assert( WP_Block_Type_Registry::get_instance()->is_registered( 'core/file' ), 'core/file registered' );
+          $url = home_url( '/wp-content/uploads/fixture.html' );
+          $inner = '<div class="wp-block-file"><a href="' . esc_url( $url ) . '">Fixture</a>' .
+              '<a href="' . esc_url( $url ) . '" class="wp-block-file__button" download>Download</a></div>';
+          $block = static function ( $attributes ) use ( $inner ) {
+              return '<!-- wp:file ' . wp_json_encode( $attributes ) . ' -->' . $inner . '<!-- /wp:file -->';
+          };
+          $off = do_blocks( $block( array( 'href' => $url ) ) );
+          hfp_wp_assert( false === strpos( $off, 'data-hfp-preview' ), 'existing HTML File block defaults to no preview' );
+          $on = do_blocks( $block( array( 'href' => $url, 'hfpShowPreview' => true, 'hfpPreviewHeight' => 720 ) ) );
+          hfp_wp_assert( 1 === substr_count( $on, '<iframe ' ), 'explicit opt-in creates one iframe' );
+          hfp_wp_assert( false !== strpos( $on, 'height:720px' ) || false !== strpos( $on, 'height="720"' ), 'per-block height rendered' );
+          hfp_wp_assert( false !== strpos( $on, 'download>Download</a>' ), 'native download preserved' );
+          hfp_wp_assert( false !== strpos( $on, 'sandbox="allow-scripts"' ), 'sandbox stays restricted' );
+          $disabled = do_blocks( $block( array( 'href' => $url, 'hfpShowPreview' => false ) ) );
+          hfp_wp_assert( false === strpos( $disabled, 'data-hfp-preview' ), 'explicit off prevents iframe' );
+          $pdf = do_blocks( $block( array( 'href' => str_replace( '.html', '.pdf', $url ) ) ) );
+          hfp_wp_assert( false === strpos( $pdf, 'data-hfp-preview' ), 'PDF unaffected' );
+          do_action( 'enqueue_block_editor_assets' );
+          hfp_wp_assert( wp_script_is( 'hfp-editor', 'enqueued' ), 'editor script enqueued' );
+          hfp_wp_assert( wp_style_is( 'hfp-preview', 'enqueued' ), 'preview stylesheet enqueued' );
+          WP_CLI::success( 'HTML File Preview real WordPress integration checks passed.' );
+          PHPEOF
+          php -l wordpress-plugin/html-file-preview/tests/wordpress-integration.php
+          git diff --check
+
+      - name: Run PHP and JavaScript regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          php -l wordpress-plugin/html-file-preview/html-file-preview.php
+          php wordpress-plugin/html-file-preview/tests/unit.php
+          node wordpress-plugin/html-file-preview/tests/editor.test.cjs
+
+      - name: Test install and Gutenberg rendering on disposable WordPress
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar -o /tmp/wp-cli.phar
+          WPROOT="$RUNNER_TEMP/wordpress-test"
+          php /tmp/wp-cli.phar core download --path="$WPROOT" --locale=en_US
+          php /tmp/wp-cli.phar config create --path="$WPROOT" --dbname=html_preview_wp --dbuser=root --dbpass=root --dbhost=127.0.0.1
+          php /tmp/wp-cli.phar core install --path="$WPROOT" --url=http://localhost:8888 --title=PreviewTest --admin_user=admin --admin_password='TestPassword123!' --admin_email=test@example.org --skip-email
+          php /tmp/wp-cli.phar plugin install "$GITHUB_WORKSPACE/release-artifacts/html-file-preview-0.2.2-beta.1.zip" --activate --path="$WPROOT"
+          php /tmp/wp-cli.phar eval-file wordpress-plugin/html-file-preview/tests/wordpress-integration.php --path="$WPROOT"
+
+      - name: Commit verified plugin source onto release branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A wordpress-plugin/html-file-preview
+          git diff --cached --check
+          git diff --cached --quiet && { echo "ERROR: source update missing"; exit 1; }
+          git commit -m 'release(html-file-preview): v0.2.2-beta.1 opt-in preview'
+          git push origin HEAD:refs/heads/publish/html-file-preview-v0.2.2-beta.1
+
+      - name: Publish dedicated HTML File Preview prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG='html-file-preview-v0.2.2-beta.1'
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG"; then
+            echo "::error::Tag already exists, refusing to overwrite."
+            exit 1
+          fi
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Release already exists, refusing to overwrite."
+            exit 1
+          fi
+          git tag -a "$TAG" -m 'HTML File Preview v0.2.2-beta.1 (maintainer verified)'
+          git push origin "refs/tags/$TAG"
+          cat > /tmp/html-file-preview-notes.md <<'NOTES'
+          ## HTML File Preview v0.2.2-beta.1
+
+          **Beta pre-release. Maintainer-confirmed real WordPress acceptance testing passed.**
+
+          - Preview is **off by default**, including older HTML File blocks.
+          - In the native Gutenberg File block, enable or disable HTML inline preview and adjust height per block.
+          - Preserve the original file link and download button.
+          - Only same-origin HTML/HTM files are eligible; iframe remains sandboxed without allow-same-origin.
+          - PDF, ICS, and unrelated blocks are unchanged.
+          - Includes read-only diagnostic tooling.
+
+          Installation: WordPress Admin > Plugins > Add New > Upload Plugin > upload the ZIP, and replace the prior HTML File Preview plugin.
+
+          Release asset is the **byte-for-byte original maintainer-tested ZIP**; SHA-256:
+          `e7bca58a6081b1e81de586bc7c0f7fa8b918cfeb92f8828a7d35024628fe7a1d`
+          NOTES
+          gh release create "$TAG" release-artifacts/html-file-preview-0.2.2-beta.1.zip --repo "$GITHUB_REPOSITORY" --verify-tag --title 'HTML File Preview v0.2.2-beta.1 (Pre-release)' --notes-file /tmp/html-file-preview-notes.md --prerelease
+
+      - name: Verify GitHub release asset checksum
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/released
+          gh release download html-file-preview-v0.2.2-beta.1 --repo "$GITHUB_REPOSITORY" --pattern html-file-preview-0.2.2-beta.1.zip --dir /tmp/released
+          printf '%s  %s\n' 'e7bca58a6081b1e81de586bc7c0f7fa8b918cfeb92f8828a7d35024628fe7a1d' '/tmp/released/html-file-preview-0.2.2-beta.1.zip' | sha256sum -c -
