@@ -1,5 +1,12 @@
 # WordPress Blog Log → ICS CLI
 
+## What’s in this repository
+| Component | Where to start |
+| --- | --- |
+| WordPress Blog → ICS / CalDAV | [Getting started](GETTING_STARTED.md) · [Python CLI and service source](wp_log_parser/) |
+| Inbox Watcher | [Standalone file watcher and WordPress uploader](tools/wp-inbox-watcher/README.md) |
+| HTML File Preview | [WordPress plugin for previewing HTML files](wordpress-plugin/html-file-preview/README.md) |
+
 Convert diary-style WordPress posts into structured timeline events and `.ics` calendar files.
 
 This project is for developers and power users who already work with WordPress and command-line workflows.
